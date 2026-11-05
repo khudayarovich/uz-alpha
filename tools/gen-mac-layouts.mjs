@@ -19,7 +19,8 @@ if (!inputPath || !outDir) {
   process.exit(2);
 }
 
-// The names must match the KLInfo_<name> keys in the bundle's Info.plist.
+// `name` is what macOS shows. The bundle's Info.plist refers to each layout by
+// its file name: KLInfo_UzAlphaManual, KLInfo_UzAlphaAuto.
 const MANUAL = { name: 'Özbekça (lotin, qölda)', id: -24871, file: 'UzAlphaManual.keylayout' };
 const AUTO = { name: 'Özbekça (lotin, avtomatik)', id: -24872, file: 'UzAlphaAuto.keylayout' };
 

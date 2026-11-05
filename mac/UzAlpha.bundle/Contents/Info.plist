@@ -10,14 +10,15 @@
 	<string>1.0.0</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0.0</string>
-	<key>KLInfo_Özbekça (lotin, avtomatik)</key>
+	<!-- KLInfo_<file name of the .keylayout, without extension> -->
+	<key>KLInfo_UzAlphaAuto</key>
 	<dict>
 		<key>TISInputSourceID</key>
 		<string>uz.uzalpha.keyboardlayout.uzalpha.auto</string>
 		<key>TISIntendedLanguage</key>
 		<string>uz</string>
 	</dict>
-	<key>KLInfo_Özbekça (lotin, qölda)</key>
+	<key>KLInfo_UzAlphaManual</key>
 	<dict>
 		<key>TISInputSourceID</key>
 		<string>uz.uzalpha.keyboardlayout.uzalpha.manual</string>
