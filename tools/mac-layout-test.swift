@@ -59,13 +59,18 @@ func layoutData(named name: String, expectedID: String) -> Data? {
         else { continue }
         let langs = languages(input)
         print("registered \"\(shown)\": id \(id), first language \(langs.first ?? "none")")
-        if id != expectedID {
+        // macOS has been seen to keep its own generated id for one layout while
+        // taking the Info.plist id for the other; either is fine as long as it
+        // belongs to our bundle. The language decides where the keyboard is
+        // listed, so that one must be right.
+        if id != expectedID { print("  (Info.plist asks for \(expectedID))") }
+        if !id.hasPrefix("uz.uzalpha.keyboardlayout.uzalpha") {
             idProblems += 1
-            print("  NOTE: expected id \(expectedID)")
+            print("  FAIL: the id does not belong to the UzAlpha bundle")
         }
         if langs.first != "uz" {
             idProblems += 1
-            print("  NOTE: expected Uzbek as the first language")
+            print("  FAIL: Uzbek should be the first language")
         }
         if result == nil { result = Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data }
     }
@@ -167,10 +172,5 @@ expect(auto, "auto", "Yangi o'zbek alifbosi uchun", "Yangi özbek alifbosi uçun
 expect(manual, "manual", ";'[]", "şçöğ")
 expect(manual, "manual", "salom", "salom")
 
-print("\(checks) checks, \(failed) failed")
-if idProblems > 0 {
-    // Typing is what matters; the id and language only affect how macOS files
-    // the keyboards in its list. Reported, not fatal.
-    print("\(idProblems) note(s) about input source ids or languages, see above")
-}
-exit(failed == 0 ? 0 : 1)
+print("\(checks) typing checks, \(failed) failed; \(idProblems) registration problem(s)")
+exit(failed == 0 && idProblems == 0 ? 0 : 1)
