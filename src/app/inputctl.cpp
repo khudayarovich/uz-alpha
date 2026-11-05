@@ -91,7 +91,23 @@ Keyboard DetectKeyboard() {
 
     // Any other language: UzAlpha is simply not involved.
     if (LOWORD(hkl) != UZA_LANGID) return Keyboard::Other;
-    // The text service says where it is working, and in which mode.
+
+    // The keyboard is one setting for the whole session (unless the user chose
+    // a separate one per window), and this thread follows it. Ask Windows which
+    // profile is active rather than the text service inside the foreground
+    // program: after an update, a program that has not been restarted still
+    // runs the old service, and a very old one reports the wrong mode.
+    TF_INPUTPROCESSORPROFILE p = {};
+    if (g_profiles && SUCCEEDED(g_profiles->GetActiveProfile(GUID_TFCAT_TIP_KEYBOARD, &p)) &&
+        p.langid == UZA_LANGID) {
+        if (p.dwProfileType != TF_PROFILETYPE_INPUTPROCESSOR || !IsEqualCLSID(p.clsid, CLSID_UzAlphaTip)) {
+            return Keyboard::Other;  // Uzbek, but some other keyboard
+        }
+        return IsEqualGUID(p.guidProfile, GUID_UzAlphaManualProfile) ? Keyboard::Manual : Keyboard::Auto;
+    }
+
+    // This thread is not on Uzbek although the foreground program is (input
+    // set per window): go by what the text service there reports.
     if (ActiveThread() == 0) return Keyboard::Other;
     return ReadFlag(g_modeFlag) == UZA_MODE_MANUAL ? Keyboard::Manual : Keyboard::Auto;
 }
