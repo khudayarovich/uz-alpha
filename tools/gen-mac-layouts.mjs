@@ -232,22 +232,18 @@ const typeManual = simulator(manual);
 check(typeManual, ";'[]", 'şçöğ');
 
 // --- Info.plist -------------------------------------------------------------
-// Each layout gets a KLInfo_<key> entry carrying its input source id and
-// language. Which <key> macOS matches is not documented for XML layouts, so
-// EXPERIMENT writes every plausible form with a distinguishable id; the macOS
-// test prints the id macOS ends up using.
+// Each layout gets a KLInfo_<name> entry carrying its input source id and
+// language. macOS matches <name> against the keyboard's name attribute (found
+// by experiment on a macOS runner: not the file name, not the numeric id).
+// The name contains accented letters, so it is written in both composed and
+// decomposed form to match however the system holds it.
 const BUNDLE_ID = 'uz.uzalpha.keyboardlayout.uzalpha';
-const EXPERIMENT = true;
 
 function klInfoKeys(layout, short) {
-  const file = layout.file.replace(/\.keylayout$/, '');
-  if (!EXPERIMENT) return [[file, `${BUNDLE_ID}.${short}`]];
+  const id = `${BUNDLE_ID}.${short}`;
   return [
-    [file, `${BUNDLE_ID}.${short}.byfile`],
-    [layout.name.normalize('NFC'), `${BUNDLE_ID}.${short}.byname`],
-    [layout.name.normalize('NFD'), `${BUNDLE_ID}.${short}.bynamenfd`],
-    [layout.name.replace(/[^\p{L}\p{N}]/gu, ''), `${BUNDLE_ID}.${short}.bysanitized`],
-    [String(layout.id), `${BUNDLE_ID}.${short}.bynumber`],
+    [layout.name.normalize('NFC'), id],
+    [layout.name.normalize('NFD'), id],
   ];
 }
 

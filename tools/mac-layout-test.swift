@@ -21,7 +21,12 @@ let installed = folder.appendingPathComponent("UzAlpha.bundle")
 do {
     try fm.createDirectory(at: folder, withIntermediateDirectories: true)
     if fm.fileExists(atPath: installed.path) { try fm.removeItem(at: installed) }
-    try fm.copyItem(at: source, to: installed)
+    // Copy next to the destination and rename, so the system never sees a
+    // half-copied bundle.
+    let staging = folder.appendingPathComponent(".UzAlpha.staging")
+    if fm.fileExists(atPath: staging.path) { try fm.removeItem(at: staging) }
+    try fm.copyItem(at: source, to: staging)
+    try fm.moveItem(at: staging, to: installed)
 } catch {
     print("cannot copy the bundle: \(error)")
     exit(2)
@@ -38,10 +43,13 @@ func languages(_ input: TISInputSource) -> [String] {
     return (Unmanaged<CFArray>.fromOpaque(raw).takeUnretainedValue() as NSArray).compactMap { $0 as? String }
 }
 
-// Finds a layout of ours by the name macOS shows for it, and reports the
-// input source id and language macOS gave it.
-func layoutData(named name: String) -> Data? {
+var idProblems = 0
+
+// Finds a layout of ours by the name macOS shows for it, and checks the input
+// source id and language macOS gave it against the bundle's Info.plist.
+func layoutData(named name: String, expectedID: String) -> Data? {
     guard let all = TISCreateInputSourceList(nil, true)?.takeRetainedValue() as NSArray? else { return nil }
+    var result: Data?
     for item in all {
         let input = item as! TISInputSource
         guard let id = stringProperty(input, kTISPropertyInputSourceID), id.lowercased().contains("uzalpha"),
@@ -49,10 +57,19 @@ func layoutData(named name: String) -> Data? {
               shown.precomposedStringWithCanonicalMapping == name.precomposedStringWithCanonicalMapping,
               let raw = TISGetInputSourceProperty(input, kTISPropertyUnicodeKeyLayoutData)
         else { continue }
-        print("found \"\(shown)\": id \(id), languages \(languages(input))")
-        return Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data
+        let langs = languages(input)
+        print("registered \"\(shown)\": id \(id), first language \(langs.first ?? "none")")
+        if id != expectedID {
+            idProblems += 1
+            print("  NOTE: expected id \(expectedID)")
+        }
+        if langs.first != "uz" {
+            idProblems += 1
+            print("  NOTE: expected Uzbek as the first language")
+        }
+        if result == nil { result = Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data }
     }
-    return nil
+    return result
 }
 
 // US (ANSI) key codes of the characters used below.
@@ -114,8 +131,8 @@ func expect(_ data: Data, _ name: String, _ input: String, _ want: String) {
     }
 }
 
-guard let auto = layoutData(named: "Özbekça (lotin, avtomatik)"),
-      let manual = layoutData(named: "Özbekça (lotin, qölda)")
+guard let auto = layoutData(named: "Özbekça (lotin, avtomatik)", expectedID: "uz.uzalpha.keyboardlayout.uzalpha.auto"),
+      let manual = layoutData(named: "Özbekça (lotin, qölda)", expectedID: "uz.uzalpha.keyboardlayout.uzalpha.manual")
 else {
     print("macOS did not accept the layouts. Input sources it knows that mention uzalpha:")
     if let all = TISCreateInputSourceList(nil, true)?.takeRetainedValue() as NSArray? {
@@ -151,4 +168,9 @@ expect(manual, "manual", ";'[]", "şçöğ")
 expect(manual, "manual", "salom", "salom")
 
 print("\(checks) checks, \(failed) failed")
+if idProblems > 0 {
+    // Typing is what matters; the id and language only affect how macOS files
+    // the keyboards in its list. Reported, not fatal.
+    print("\(idProblems) note(s) about input source ids or languages, see above")
+}
 exit(failed == 0 ? 0 : 1)
