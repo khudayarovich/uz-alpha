@@ -28,14 +28,31 @@ do {
 }
 print("TISRegisterInputSource: \(TISRegisterInputSource(installed as CFURL))")
 
-func layoutData(_ id: String) -> Data? {
-    let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
-    guard let unmanaged = TISCreateInputSourceList(filter, true) else { return nil }
-    let list = unmanaged.takeRetainedValue() as NSArray
-    guard list.count > 0 else { return nil }
-    let input = list[0] as! TISInputSource
-    guard let raw = TISGetInputSourceProperty(input, kTISPropertyUnicodeKeyLayoutData) else { return nil }
-    return Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data
+func stringProperty(_ input: TISInputSource, _ key: CFString) -> String? {
+    guard let raw = TISGetInputSourceProperty(input, key) else { return nil }
+    return Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue() as String
+}
+
+func languages(_ input: TISInputSource) -> [String] {
+    guard let raw = TISGetInputSourceProperty(input, kTISPropertyInputSourceLanguages) else { return [] }
+    return (Unmanaged<CFArray>.fromOpaque(raw).takeUnretainedValue() as NSArray).compactMap { $0 as? String }
+}
+
+// Finds a layout of ours by the name macOS shows for it, and reports the
+// input source id and language macOS gave it.
+func layoutData(named name: String) -> Data? {
+    guard let all = TISCreateInputSourceList(nil, true)?.takeRetainedValue() as NSArray? else { return nil }
+    for item in all {
+        let input = item as! TISInputSource
+        guard let id = stringProperty(input, kTISPropertyInputSourceID), id.lowercased().contains("uzalpha"),
+              let shown = stringProperty(input, kTISPropertyLocalizedName),
+              shown.precomposedStringWithCanonicalMapping == name.precomposedStringWithCanonicalMapping,
+              let raw = TISGetInputSourceProperty(input, kTISPropertyUnicodeKeyLayoutData)
+        else { continue }
+        print("found \"\(shown)\": id \(id), languages \(languages(input))")
+        return Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data
+    }
+    return nil
 }
 
 // US (ANSI) key codes of the characters used below.
@@ -97,16 +114,15 @@ func expect(_ data: Data, _ name: String, _ input: String, _ want: String) {
     }
 }
 
-guard let auto = layoutData("uz.uzalpha.keyboardlayout.uzalpha.auto"),
-      let manual = layoutData("uz.uzalpha.keyboardlayout.uzalpha.manual")
+guard let auto = layoutData(named: "Özbekça (lotin, avtomatik)"),
+      let manual = layoutData(named: "Özbekça (lotin, qölda)")
 else {
     print("macOS did not accept the layouts. Input sources it knows that mention uzalpha:")
     if let all = TISCreateInputSourceList(nil, true)?.takeRetainedValue() as NSArray? {
         for item in all {
             let input = item as! TISInputSource
-            if let raw = TISGetInputSourceProperty(input, kTISPropertyInputSourceID) {
-                let id = Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue() as String
-                if id.lowercased().contains("uzalpha") { print("  \(id)") }
+            if let id = stringProperty(input, kTISPropertyInputSourceID), id.lowercased().contains("uzalpha") {
+                print("  \(id)  \"\(stringProperty(input, kTISPropertyLocalizedName) ?? "?")\"")
             }
         }
     }
