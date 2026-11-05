@@ -45,8 +45,14 @@ void CleanUserList();
 // Are both keyboards in the user's own keyboard list?
 bool KeyboardsInUserList();
 
+// Starting with Windows: the entry in this user's Run key.
 bool GetAutostart();
 void SetAutostart(bool on);
+// The user's own choice (the checkbox): remembered, and applied.
+void ChooseAutostart(bool on);
+// Puts the entry back when it is gone or points elsewhere, unless the user
+// turned starting with Windows off. Called every time the app starts.
+void EnsureAutostart();
 
 // --- inputctl.cpp ------------------------------------------------------------
 enum class Keyboard { Other, Auto, Manual };
@@ -95,6 +101,7 @@ void SetAutoUpdate(bool on);
 bool GetSetting(const wchar_t* name);
 void SetSetting(const wchar_t* name, bool on);
 #define UZA_SETTING_CYCLE L"LanguageKeyCycle"
+#define UZA_SETTING_AUTOSTART L"Autostart"
 
 // --- convert.cpp -------------------------------------------------------------
 #define UZA_HOTKEY_TO_NEW 1

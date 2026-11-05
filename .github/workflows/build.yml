@@ -64,7 +64,35 @@ jobs:
           chmod +x dist/UzAlpha-macOS/install.command
           cd dist
           ditto -c -k --keepParent UzAlpha-macOS UzAlpha-macOS.zip
+
+          # The disk image holds the same files, plus a shortcut to the system's
+          # keyboard folder (the bundle is dragged onto it) and a short how-to.
+          ln -s "/Library/Keyboard Layouts" "UzAlpha-macOS/Keyboard Layouts"
+          cp ../mac/dmg-readme.txt UzAlpha-macOS/README.txt
+          xattr -w com.apple.TextEncoding "utf-8;134217984" UzAlpha-macOS/README.txt
+          # hdiutil now and then answers "Resource busy" on the build machines.
+          for attempt in 1 2 3 4 5; do
+            if hdiutil create -volname UzAlpha -srcfolder UzAlpha-macOS -fs HFS+ -format UDZO -ov UzAlpha-macOS.dmg; then
+              break
+            fi
+            if [ "$attempt" = 5 ]; then echo "could not create the disk image"; exit 1; fi
+            sleep 5
+          done
           rm -rf UzAlpha-macOS
+          ls -l
+
+      - name: Open the disk image and install the keyboards from it
+        run: |
+          mount="$RUNNER_TEMP/uzalpha-dmg"
+          mkdir -p "$mount"
+          hdiutil attach dist/UzAlpha-macOS.dmg -nobrowse -readonly -mountpoint "$mount"
+          ls -la "$mount"
+          diff -r mac/UzAlpha.bundle "$mount/UzAlpha.bundle"
+          test -x "$mount/install.command"
+          test -s "$mount/README.txt"
+          test "$(readlink "$mount/Keyboard Layouts")" = "/Library/Keyboard Layouts"
+          swift tools/mac-layout-test.swift "$mount/UzAlpha.bundle"
+          hdiutil detach "$mount"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -93,4 +121,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "UzAlpha ${GITHUB_REF_NAME#v}" \
             --notes-file .github/release-notes.md \
-            dist/UzAlpha.exe dist/update.txt dist/UzAlpha-macOS.zip
+            dist/UzAlpha.exe dist/update.txt dist/UzAlpha-macOS.dmg dist/UzAlpha-macOS.zip

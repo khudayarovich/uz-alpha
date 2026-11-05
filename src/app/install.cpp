@@ -13,6 +13,8 @@
 #include <shellapi.h>
 #include <shlobj.h>
 
+#include <share.h>
+
 #include <cstdarg>
 #include <cstdio>
 #include <set>
@@ -415,8 +417,10 @@ void Log(const wchar_t* fmt, ...) {
     CreateDirectoryW(path.c_str(), nullptr);
     path += L"\\uzalpha.log";
 
-    FILE* f = nullptr;
-    if (_wfopen_s(&f, path.c_str(), L"a, ccs=UTF-8") != 0 || !f) return;
+    // Shared on purpose: _wfopen_s opens for writing exclusively, so a line was
+    // silently lost whenever anything else had the log open, even just to read.
+    FILE* f = _wfsopen(path.c_str(), L"a, ccs=UTF-8", _SH_DENYNO);
+    if (!f) return;
     SYSTEMTIME t;
     GetLocalTime(&t);
     fwprintf(f, L"%04u-%02u-%02u %02u:%02u:%02u  ", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
@@ -677,11 +681,16 @@ bool KeyboardsInUserList() {
 
 bool GetAutostart() { return GetRegString(HKEY_CURRENT_USER, kRunKey, UZA_BRAND, nullptr); }
 
+namespace {
+// Always the installed copy, so a download folder can be cleaned up.
+std::wstring AutostartCommand() {
+    return L"\"" + (IsInstalled() ? InstalledExePath() : SelfPath()) + L"\" /tray";
+}
+}  // namespace
+
 void SetAutostart(bool on) {
     if (on) {
-        // Always the installed copy, so a download folder can be cleaned up.
-        const std::wstring exe = IsInstalled() ? InstalledExePath() : SelfPath();
-        SetRegString(HKEY_CURRENT_USER, kRunKey, UZA_BRAND, L"\"" + exe + L"\" /tray");
+        SetRegString(HKEY_CURRENT_USER, kRunKey, UZA_BRAND, AutostartCommand());
     } else {
         HKEY h = nullptr;
         if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_SET_VALUE, &h) == ERROR_SUCCESS) {
@@ -691,8 +700,28 @@ void SetAutostart(bool on) {
     }
 }
 
+void ChooseAutostart(bool on) {
+    SetSetting(UZA_SETTING_AUTOSTART, on);
+    SetAutostart(on);
+}
+
+// The Run entry is written at the first install only, so anything that removes
+// it afterwards (a cleanup tool, a restored profile, an install made by an
+// older version) would leave the app silently not starting any more. The choice
+// is therefore kept apart from the entry, and the entry is checked at each start.
+void EnsureAutostart() {
+    if (!IsInstalled() || !GetSetting(UZA_SETTING_AUTOSTART)) return;
+    std::wstring have;
+    const bool present = GetRegString(HKEY_CURRENT_USER, kRunKey, UZA_BRAND, &have);
+    if (present && lstrcmpiW(have.c_str(), AutostartCommand().c_str()) == 0) return;
+    SetAutostart(true);
+    Log(L"autostart: the entry was %s, written again", present ? L"pointing elsewhere" : L"missing");
+}
+
 bool InstallEverything(HWND owner, std::wstring* error) {
     error->clear();
+    // A first install starts with Windows; an update keeps what the user chose.
+    const bool fresh = !IsInstalled();
     DWORD code = 0;
     bool cancelled = false;
     if (!RunSelfElevated(owner, L"/install-machine", &code, &cancelled)) {
@@ -706,7 +735,11 @@ bool InstallEverything(HWND owner, std::wstring* error) {
         return false;
     }
     if (!EnableForUser()) Log(L"could not add the keyboards to the user's list");
-    SetAutostart(true);
+    if (fresh) {
+        ChooseAutostart(true);
+    } else {
+        EnsureAutostart();
+    }
     return true;
 }
 
@@ -714,6 +747,7 @@ bool UninstallEverything(HWND owner, std::wstring* error) {
     error->clear();
     // While the machine-level registration still exists, take the keyboards
     // out of this user's list.
+    const bool hadAutostart = GetAutostart();
     DisableForUser();
     SetAutostart(false);
 
@@ -723,7 +757,7 @@ bool UninstallEverything(HWND owner, std::wstring* error) {
         if (!cancelled) *error = L"Öçiriş dasturini işga tuşirib bölmadi.";
         // Declined: put the user's keyboards back.
         EnableForUser();
-        SetAutostart(true);
+        if (hadAutostart) SetAutostart(true);
         return false;
     }
     if (code != 0) {

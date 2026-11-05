@@ -4,7 +4,7 @@ Yangi özbek alifbosi (ş ç ö ğ va tutuq belgisi ʼ) uçun Windows va macOS k
 Keyboards for the new Uzbek Latin alphabet, for Windows and macOS.
 
 **[⬇ Windows — UzAlpha.exe](https://github.com/khudayarovich/uz-alpha/releases/latest/download/UzAlpha.exe)** ·
-**[⬇ macOS — UzAlpha-macOS.zip](https://github.com/khudayarovich/uz-alpha/releases/latest/download/UzAlpha-macOS.zip)** ·
+**[⬇ macOS — UzAlpha-macOS.dmg](https://github.com/khudayarovich/uz-alpha/releases/latest/download/UzAlpha-macOS.dmg)** ·
 [Barça versiyalar / all releases](https://github.com/khudayarovich/uz-alpha/releases)
 
 ---
@@ -31,15 +31,17 @@ Tilni almaştiriş tugmalari (**Alt+Shift**) ikkala klaviaturadan ötadi: boşqa
 3. **Örnatiş** tugmasini bosing va Windows sörovini tasdiqlang.
 4. Klaviaturani **Win + Space** orqali yoki UzAlpha oynasidagi **Avtomatik / Qölda** tugmalari bilan tanlang.
 
-UzAlpha’ni Start menyusidan yoki iş stolidagi yorliqdan oçiş mumkin; özi soat yonidagi belgiçalar orasida turadi. Windows’ning tillar röyxatida klaviaturalar **UZA** va **UZM** belgisi bilan körinadi. Yangi versiya çiqsa, uni özi tekşirib yuklab oladi — **Yangilaş** tugmasini bosiş kifoya.
+UzAlpha’ni Start menyusidan yoki iş stolidagi yorliqdan oçiş mumkin; özi soat yonidagi belgiçalar orasida turadi va Windows bilan birga işga tuşadi (buni oynada öçirib qöyiş mumkin). Windows’ning tillar röyxatida klaviaturalar **UZA** va **UZM** belgisi bilan körinadi. Yangi versiya çiqsa, uni özi tekşirib yuklab oladi — **Yangilaş** tugmasini bosiş kifoya.
 Öçiriş uçun: oynadagi **Öçiriş** tugmasi yoki Settings → Apps → UzAlpha.
 
 ### macOS’ga örnatiş
 
-1. [UzAlpha-macOS.zip](https://github.com/khudayarovich/uz-alpha/releases/latest/download/UzAlpha-macOS.zip) faylini yuklab, oçing.
-2. `install.command` faylini işga tuşiring (öng tugma → **Open**).
+1. [UzAlpha-macOS.dmg](https://github.com/khudayarovich/uz-alpha/releases/latest/download/UzAlpha-macOS.dmg) faylini yuklab, oçing.
+2. Oçilgan oynada `UzAlpha.bundle` ni **Keyboard Layouts** papkasi ustiga sudrab taşlang (macOS parolingizni söraydi). Yoki faqat özingiz uçun: `install.command` faylini işga tuşiring (öng tugma → **Open**).
 3. Tizimdan çiqib, qayta kiring.
 4. System Settings → Keyboard → Input Sources → Edit → **+** orqali ikkala klaviaturani qöşing.
+
+Şu fayllarning özi [UzAlpha-macOS.zip](https://github.com/khudayarovich/uz-alpha/releases/latest/download/UzAlpha-macOS.zip) körinişida ham bor.
 
 macOS versiyasida Backspace bilan bekor qiliş yöq, `'` esa har doim ʼ yozadi (oddiy `'` — Option+`'`).
 
@@ -62,11 +64,11 @@ Both keyboards are modes of one Windows text service. In the Windows keyboard sw
 
 ### Install
 
-**Windows 10/11 (x64).** Download and run `UzAlpha.exe`, press **Örnatiş** and approve the Windows prompt. The binaries are not code-signed yet, so SmartScreen warns on first run (More info → Run anyway). Windows on ARM is not supported yet. Remove it with **Öçiriş** in the window or from Settings → Apps.
+**Windows 10/11 (x64).** Download and run `UzAlpha.exe`, press **Örnatiş** and approve the Windows prompt. The binaries are not code-signed yet, so SmartScreen warns on first run (More info → Run anyway). Windows on ARM is not supported yet. UzAlpha then starts with Windows and sits in the notification area; the window has a checkbox to turn that off. Remove it with **Öçiriş** in the window or from Settings → Apps.
 
 `UzAlpha.exe /install /quiet` installs without opening the window; `UzAlpha.exe /uninstall /quiet` removes it.
 
-**macOS.** Unzip `UzAlpha-macOS.zip`, run `install.command`, log out and in, then add both keyboards under System Settings → Keyboard → Input Sources. In this file-based version there is no Backspace-undo, `'` always types ʼ (plain `'` is on Option+`'`), and the first letter of a pair is shown highlighted until the next key.
+**macOS.** Open `UzAlpha-macOS.dmg` and drag `UzAlpha.bundle` onto the **Keyboard Layouts** folder next to it (installs for all users, macOS asks for your password), or run `install.command` to install for yourself only. Log out and in, then add both keyboards under System Settings → Keyboard → Input Sources. `UzAlpha-macOS.zip` holds the same files. In this file-based version there is no Backspace-undo, `'` always types ʼ (plain `'` is on Option+`'`), and the first letter of a pair is shown highlighted until the next key.
 
 ### Updates
 

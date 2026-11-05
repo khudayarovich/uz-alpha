@@ -41,6 +41,34 @@ foreach ($name in $profiles.Keys) {
     Check "the $name keyboard is in the user's list" ($tips -match [regex]::Escape($profiles[$name]))
 }
 
+Write-Host '=== starting with Windows'
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$settingsKey = 'HKCU:\Software\UzAlpha'
+$installedExe = "$env:ProgramFiles\UzAlpha\UzAlpha.exe"
+$startupCommand = "`"$installedExe`" /tray"
+function StartupEntry { (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).UzAlpha }
+# Starts the installed app the way Windows does at sign-in, gives it time to
+# settle, and stops it again. Returns whether it was still running.
+function RunAppBriefly {
+    $app = Start-Process $installedExe -ArgumentList '/tray' -PassThru
+    Start-Sleep -Seconds 8
+    $alive = -not $app.HasExited
+    if ($alive) { Stop-Process -Id $app.Id -Force; $app.WaitForExit() }
+    return $alive
+}
+Write-Host "      startup entry: $(StartupEntry)"
+Check 'the install wrote the startup entry for the installed copy' ((StartupEntry) -eq $startupCommand)
+Remove-ItemProperty $runKey -Name UzAlpha
+Check 'the app keeps running in the tray' (RunAppBriefly)
+Check 'a lost startup entry is written again when the app starts' ((StartupEntry) -eq $startupCommand)
+Set-ItemProperty $settingsKey -Name Autostart -Value 0 -Type DWord
+Remove-ItemProperty $runKey -Name UzAlpha
+[void](RunAppBriefly)
+Check 'the entry stays away when the user turned starting with Windows off' ($null -eq (StartupEntry))
+Set-ItemProperty $settingsKey -Name Autostart -Value 1 -Type DWord
+[void](RunAppBriefly)
+Check 'and comes back when it is turned on again' ((StartupEntry) -eq $startupCommand)
+
 Write-Host '--- legacy keyboard list (information)'
 $pre = Get-ItemProperty 'HKCU:\Keyboard Layout\Preload' -ErrorAction SilentlyContinue
 $sub = Get-ItemProperty 'HKCU:\Keyboard Layout\Substitutes' -ErrorAction SilentlyContinue
@@ -63,6 +91,7 @@ Check 'the text service registration is gone' (-not (Test-Path $tipKey))
 Check 'the COM class is gone' (-not (Test-Path "HKLM:\SOFTWARE\Classes\CLSID\$clsid"))
 Check 'the Apps entry is gone' (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\UzAlpha'))
 Check 'the shortcuts are gone' (-not (Test-Path $startMenu) -and -not (Test-Path $desktop))
+Check 'the startup entry is gone' ($null -eq (StartupEntry))
 $tips = InputList
 Write-Host "      this user's input list: $tips"
 Check "the keyboards are out of the user's list" ($tips -notmatch [regex]::Escape($clsid))

@@ -671,6 +671,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 } else {
                     EnableForUser();
                 }
+                EnsureAutostart();
             }
             g_active = g_installed ? DetectKeyboard() : Keyboard::Other;
             LogInputState(L"start");
@@ -769,7 +770,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     }
                     break;
                 case IDC_AUTOSTART:
-                    SetAutostart(Button_GetCheck(GetDlgItem(hwnd, IDC_AUTOSTART)) == BST_CHECKED);
+                    ChooseAutostart(Button_GetCheck(GetDlgItem(hwnd, IDC_AUTOSTART)) == BST_CHECKED);
                     break;
                 case IDC_AUTOUPDATE: {
                     const bool on = Button_GetCheck(GetDlgItem(hwnd, IDC_AUTOUPDATE)) == BST_CHECKED;
