@@ -1,0 +1,7 @@
+build/
+*.obj
+*.res
+*.exp
+*.lib
+*.pdb
+.DS_Store

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>uz.uzalpha.keyboardlayout.uzalpha</string>
+	<key>CFBundleName</key>
+	<string>UzAlpha</string>
+	<key>CFBundleVersion</key>
+	<string>1.0.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>KLInfo_Özbekça (lotin, avtomatik)</key>
+	<dict>
+		<key>TISInputSourceID</key>
+		<string>uz.uzalpha.keyboardlayout.uzalpha.auto</string>
+		<key>TISIntendedLanguage</key>
+		<string>uz</string>
+	</dict>
+	<key>KLInfo_Özbekça (lotin, qölda)</key>
+	<dict>
+		<key>TISInputSourceID</key>
+		<string>uz.uzalpha.keyboardlayout.uzalpha.manual</string>
+		<key>TISIntendedLanguage</key>
+		<string>uz</string>
+	</dict>
+</dict>
+</plist>

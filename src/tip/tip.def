@@ -1,0 +1,4 @@
+LIBRARY UzAlphaTip
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow   PRIVATE

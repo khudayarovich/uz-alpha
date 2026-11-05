@@ -1,0 +1,10 @@
+* text=auto eol=lf
+
+# Batch files need Windows line endings.
+*.cmd text eol=crlf
+
+# Upstream files are kept byte for byte.
+third_party/** -text
+
+*.ico binary
+*.png binary

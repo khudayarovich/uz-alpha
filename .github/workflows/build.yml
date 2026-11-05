@@ -1,0 +1,96 @@
+name: build
+
+# Every push builds and tests. A tag vX.Y.Z (matching src/common/version.h)
+# also publishes a GitHub release with the Windows app and the macOS keyboards.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test
+        shell: cmd
+        run: build.cmd test
+
+      - name: Install on this clean machine, check, remove
+        shell: pwsh
+        run: ./tools/ci-install-test.ps1
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path src/common/version.h -Pattern 'UZA_VER_STR "(.+)"').Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$ver") {
+            throw "The tag $env:GITHUB_REF_NAME does not match the version in version.h ($ver)."
+          }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item build/app/UzAlpha.exe dist/
+          $hash = (Get-FileHash dist/UzAlpha.exe -Algorithm SHA256).Hash.ToLower()
+          # Read by the app's update check (src/app/update.cpp).
+          [IO.File]::WriteAllText("$PWD/dist/update.txt", "version=$ver`nsha256=$hash`nfile=UzAlpha.exe`n")
+          Get-Content dist/update.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Layout files match the generator
+        run: |
+          node tools/gen-mac-layouts.mjs third_party/kiritish/ozbekcha-yangi-alifbo.keylayout mac/UzAlpha.bundle/Contents/Resources
+          git diff --exit-code -- mac
+
+      - name: Type through the layouts with macOS itself
+        run: swift tools/mac-layout-test.swift mac/UzAlpha.bundle
+
+      - name: Package
+        run: |
+          mkdir -p dist/UzAlpha-macOS
+          cp -R mac/UzAlpha.bundle mac/install.command dist/UzAlpha-macOS/
+          chmod +x dist/UzAlpha-macOS/install.command
+          cd dist
+          ditto -c -k --keepParent UzAlpha-macOS UzAlpha-macOS.zip
+          rm -rf UzAlpha-macOS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" \
+            --title "UzAlpha ${GITHUB_REF_NAME#v}" \
+            --notes-file .github/release-notes.md \
+            dist/UzAlpha.exe dist/update.txt dist/UzAlpha-macOS.zip
