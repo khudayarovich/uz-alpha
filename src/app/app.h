@@ -106,13 +106,16 @@ void SetSetting(const wchar_t* name, bool on);
 // --- convert.cpp -------------------------------------------------------------
 #define UZA_HOTKEY_TO_NEW 1
 #define UZA_HOTKEY_TO_OLD 2
-#define UZA_TIMER_CLIPBOARD 42
+#define UZA_TIMER_CONVERT 42
 
 // Registers Ctrl+Alt+Shift+Y / Ctrl+Alt+Shift+E. Returns false if another
 // program already owns one of them.
 bool RegisterConvertHotkeys(HWND hwnd);
 void UnregisterConvertHotkeys(HWND hwnd);
-// Converts the text selected in the foreground application.
+// WM_HOTKEY: starts converting the text selected in the foreground application.
+// The work is carried out step by step from ConvertTick, never by waiting.
 void ConvertSelection(HWND hwnd, int hotkeyId);
-// Timer callback: puts the user's own clipboard content back.
+// WM_TIMER with UZA_TIMER_CONVERT: the next step of the conversion.
+void ConvertTick(HWND hwnd);
+// On exit: puts the user's own clipboard content back at once.
 void RestoreClipboardNow(HWND hwnd);

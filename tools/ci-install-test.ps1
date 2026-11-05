@@ -69,6 +69,20 @@ Set-ItemProperty $settingsKey -Name Autostart -Value 1 -Type DWord
 [void](RunAppBriefly)
 Check 'and comes back when it is turned on again' ((StartupEntry) -eq $startupCommand)
 
+Write-Host '=== the convert shortcut, pressed for real'
+# Ctrl+Alt+Shift+Y / E in a test window, against the installed app. A window
+# that hangs while the app waits for its copy shows up here as a stall.
+$app = Start-Process $installedExe -ArgumentList '/tray' -PassThru
+Start-Sleep -Seconds 5
+foreach ($kind in 'plain', 'rich') {
+    $testArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PWD 'tools\convert-shortcut-test.ps1'),
+                  '-Rounds', '2', '-FreezeLimitMs', '600', '-SkipIfNoForeground')
+    if ($kind -eq 'rich') { $testArgs += '-Rich' }
+    & powershell.exe @testArgs | ForEach-Object { Write-Host "      $_" }
+    Check "selected text is converted in a $kind text box, and the window keeps responding" ($LASTEXITCODE -eq 0)
+}
+if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force; $app.WaitForExit() }
+
 Write-Host '--- legacy keyboard list (information)'
 $pre = Get-ItemProperty 'HKCU:\Keyboard Layout\Preload' -ErrorAction SilentlyContinue
 $sub = Get-ItemProperty 'HKCU:\Keyboard Layout\Substitutes' -ErrorAction SilentlyContinue

@@ -714,8 +714,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             } else if (wp == kUpdateTimer) {
                 SetTimer(hwnd, kUpdateTimer, kUpdateIntervalMs, nullptr);
                 if (g_installed && GetAutoUpdate()) StartUpdateCheck(hwnd, false);
-            } else if (wp == UZA_TIMER_CLIPBOARD) {
-                RestoreClipboardNow(hwnd);
+            } else if (wp == UZA_TIMER_CONVERT) {
+                ConvertTick(hwnd);
             }
             return 0;
 
