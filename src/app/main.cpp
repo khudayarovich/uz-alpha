@@ -621,7 +621,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             // machine but not enabled for this user (a fresh update, or another
             // account on the PC), and drop what an older version left behind.
             if (g_installed) {
-                if (ProfilesEnabled()) {
+                if (ProfilesEnabled() && KeyboardsInUserList()) {
                     CleanUserList();
                 } else {
                     EnableForUser();

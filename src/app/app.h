@@ -42,6 +42,8 @@ bool EnableForUser();
 void DisableForUser();
 // Remove what an older UzAlpha left in the user's list.
 void CleanUserList();
+// Are both keyboards in the user's own keyboard list?
+bool KeyboardsInUserList();
 
 bool GetAutostart();
 void SetAutostart(bool on);

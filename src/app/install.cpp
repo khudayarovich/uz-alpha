@@ -357,11 +357,23 @@ std::set<std::wstring> EnabledInputs() {
     return ids;
 }
 
-// "0443:{clsid}{auto};0443:{clsid}{manual}" - the form Windows itself uses for
-// input ids. `prefixed` gives the 0x-prefixed form shown in the API docs.
-std::wstring UserInputList(bool prefixed) {
-    const std::wstring lang = (prefixed ? L"0x" : L"") + std::wstring(UZA_LANGID_STR) + L":" UZA_CLSID_STR;
-    return lang + UZA_PROFILE_STR + L";" + lang + UZA_MANUAL_PROFILE_STR;
+// "0443:{clsid}{profile}" - the form Windows itself uses for input ids.
+// `prefixed` gives the 0x-prefixed form shown in the API docs.
+std::wstring InputId(const ProfileDef& p, bool prefixed) {
+    return (prefixed ? L"0x" : L"") + std::wstring(UZA_LANGID_STR) + L":" UZA_CLSID_STR + p.guidStr;
+}
+
+// One call per keyboard. Given both in one list, Windows added only the
+// missing one's neighbour: on an update, where Automatic was already there,
+// Manual never made it into the list.
+bool InstallOrRemoveForUser(DWORD flags) {
+    bool all = true;
+    for (const ProfileDef& p : kProfiles) {
+        if (!CallInstallLayoutOrTip(InputId(p, false), flags) && !CallInstallLayoutOrTip(InputId(p, true), flags)) {
+            all = false;
+        }
+    }
+    return all;
 }
 
 // Per-user switch for the profiles. InstallLayoutOrTip sets it as well;
@@ -635,7 +647,7 @@ bool EnableForUser() {
     // InstallLayoutOrTip should only add, but make sure nothing else the user
     // had drops out of the list.
     const std::set<std::wstring> before = EnabledInputs();
-    const bool ok = CallInstallLayoutOrTip(UserInputList(false), 0) || CallInstallLayoutOrTip(UserInputList(true), 0);
+    const bool ok = InstallOrRemoveForUser(0);
     EnableTextServiceProfiles(true);
     const std::set<std::wstring> after = EnabledInputs();
     for (const std::wstring& id : before) {
@@ -649,10 +661,18 @@ bool EnableForUser() {
 
 void DisableForUser() {
     EnableTextServiceProfiles(false);
-    if (!CallInstallLayoutOrTip(UserInputList(false), ILOT_UNINSTALL)) {
-        CallInstallLayoutOrTip(UserInputList(true), ILOT_UNINSTALL);
-    }
+    InstallOrRemoveForUser(ILOT_UNINSTALL);
     CleanUserList();
+}
+
+bool KeyboardsInUserList() {
+    const std::set<std::wstring> enabled = EnabledInputs();
+    for (const ProfileDef& p : kProfiles) {
+        std::wstring id = InputId(p, false);
+        CharLowerW(&id[0]);
+        if (!enabled.count(id)) return false;
+    }
+    return true;
 }
 
 bool GetAutostart() { return GetRegString(HKEY_CURRENT_USER, kRunKey, UZA_BRAND, nullptr); }
