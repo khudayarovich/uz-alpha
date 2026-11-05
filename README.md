@@ -22,6 +22,8 @@ Windows’da tanlangan matnni ham ögiradi: **Ctrl+Alt+Shift+Y** — yangi alifb
 
 Boşqa klaviatura (inglizça, rusça…) tanlangan paytda UzAlpha heç narsani özgartirmaydi.
 
+Tilni almaştiriş tugmalari (**Alt+Shift**) ikkala klaviaturadan ötadi: boşqa tillar → Avtomatik → Qölda → boşqa tillar. Buni UzAlpha oynasida öçirib qöyiş mumkin.
+
 ### Windows’ga örnatiş
 
 1. [UzAlpha.exe](https://github.com/khudayarovich/uz-alpha/releases/latest/download/UzAlpha.exe) faylini yuklab oling va işga tuşiring.
@@ -53,6 +55,8 @@ UzAlpha adds two keyboards to the system keyboard list:
 | **UZM** — Özbekça (lotin, qölda), manual | The [kiritish.uz](https://kiritish.uz) layout: `;`→ş, `'`→ç, `[`→ö, `]`→ğ, `` ` ``→ʼ. |
 
 On Windows it also converts **selected text** in any program: `Ctrl+Alt+Shift+Y` to the new alphabet, `Ctrl+Alt+Shift+E` back to the old one. Nothing is converted while another keyboard is selected.
+
+The Windows language key (**Alt+Shift**) on its own only moves between languages. While UzAlpha is running it steps through both keyboards: other languages → Automatic → Manual → other languages. To do that it watches the Alt, Shift, Ctrl and Win keys only, never what you type, and it can be turned off in the window.
 
 Both keyboards are modes of one Windows text service. In the Windows keyboard switcher they carry the codes **UZA** and **UZM**. These are icons made of the letters only: Windows writes its own code (UZB) just for plain layouts, one per language.
 

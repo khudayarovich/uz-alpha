@@ -60,6 +60,11 @@ Keyboard DetectKeyboard();
 bool SwitchKeyboard(Keyboard k);
 // Does TSF consider both of our keyboards enabled for this user?
 bool ProfilesEnabled();
+// Input language of the foreground application.
+LANGID ForegroundLanguage();
+// Is the user holding the Windows "switch input language" key combination
+// (Alt+Shift by default, Ctrl+Shift if so configured)?
+bool LanguageKeysDown();
 // Writes what Windows reports about the active keyboard to the log.
 void LogInputState(const wchar_t* why);
 
@@ -86,6 +91,10 @@ std::wstring FileSha256(const std::wstring& path);
 
 bool GetAutoUpdate();
 void SetAutoUpdate(bool on);
+// Per-user on/off settings; all default to on.
+bool GetSetting(const wchar_t* name);
+void SetSetting(const wchar_t* name, bool on);
+#define UZA_SETTING_CYCLE L"LanguageKeyCycle"
 
 // --- convert.cpp -------------------------------------------------------------
 #define UZA_HOTKEY_TO_NEW 1

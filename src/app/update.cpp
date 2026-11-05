@@ -325,19 +325,23 @@ bool ApplyUpdate(HWND owner, const UpdateResult& update, std::wstring* error) {
     return true;  // the new copy adds its keyboards to the user's list when it starts
 }
 
-bool GetAutoUpdate() {
+// Per-user on/off settings (HKCU\Software\UzAlpha); all default to on.
+bool GetSetting(const wchar_t* name) {
     DWORD value = 1, size = sizeof value;
-    RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, L"AutoUpdate", RRF_RT_REG_DWORD, nullptr, &value, &size);
+    RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, name, RRF_RT_REG_DWORD, nullptr, &value, &size);
     return value != 0;
 }
 
-void SetAutoUpdate(bool on) {
+void SetSetting(const wchar_t* name, bool on) {
     HKEY h = nullptr;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, kSettingsKey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &h, nullptr) !=
         ERROR_SUCCESS) {
         return;
     }
     const DWORD value = on ? 1 : 0;
-    RegSetValueExW(h, L"AutoUpdate", 0, REG_DWORD, (const BYTE*)&value, sizeof value);
+    RegSetValueExW(h, name, 0, REG_DWORD, (const BYTE*)&value, sizeof value);
     RegCloseKey(h);
 }
+
+bool GetAutoUpdate() { return GetSetting(L"AutoUpdate"); }
+void SetAutoUpdate(bool on) { SetSetting(L"AutoUpdate", on); }

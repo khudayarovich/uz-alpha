@@ -94,6 +94,37 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
             c->SetValue(id, &v);
             c->Release();
         }
+    } else if (lstrcmpiW(argv[1], L"switch") == 0 && argc >= 4) {
+        // Can a program that does NOT have the keyboard focus switch the
+        // whole session to one of our keyboards? (tsf_diag switch <log> auto|manual)
+        const bool manual = lstrcmpiW(argv[3], L"manual") == 0;
+        const HWND fg = GetForegroundWindow();
+        const DWORD fgThread = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
+        fprintf(g_log, "before: foreground thread %lu hkl %08lx\n", fgThread,
+                (unsigned long)(ULONG_PTR)GetKeyboardLayout(fgThread));
+        ITfInputProcessorProfileMgr* profiles = nullptr;
+        hr = CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr, CLSCTX_INPROC_SERVER,
+                              __uuidof(ITfInputProcessorProfileMgr), (void**)&profiles);
+        if (SUCCEEDED(hr)) {
+            // {B514FA1D-9D1B-431C-A0E9-BFC72B190B43}: the Manual profile
+            static const GUID manualProfile = {0xb514fa1d, 0x9d1b, 0x431c, {0xa0, 0xe9, 0xbf, 0xc7, 0x2b, 0x19, 0x0b, 0x43}};
+            const GUID& profile = manual ? manualProfile : GUID_UzAlphaProfile;
+            hr = profiles->ActivateProfile(TF_PROFILETYPE_INPUTPROCESSOR, UZA_LANGID, CLSID_UzAlphaTip, profile, nullptr,
+                                           TF_IPPMF_FORSESSION);
+            fprintf(g_log, "ActivateProfile(for session): %08lx\n", hr);
+            if (hr != S_OK) {
+                hr = profiles->ActivateProfile(TF_PROFILETYPE_INPUTPROCESSOR, UZA_LANGID, CLSID_UzAlphaTip, profile,
+                                               nullptr, TF_IPPMF_FORSESSION | TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE);
+                fprintf(g_log, "ActivateProfile(for session, any language): %08lx\n", hr);
+            }
+            profiles->Release();
+        }
+        pump(900);
+        const HWND fg2 = GetForegroundWindow();
+        const DWORD fgThread2 = fg2 ? GetWindowThreadProcessId(fg2, nullptr) : 0;
+        fprintf(g_log, "after:  foreground thread %lu hkl %08lx\n", fgThread2,
+                (unsigned long)(ULONG_PTR)GetKeyboardLayout(fgThread2));
+        reportFlag(tm, "(active thread)");
     } else if (lstrcmpiW(argv[1], L"getflag") == 0) {
         reportFlag(tm, "read from another process");
     } else {

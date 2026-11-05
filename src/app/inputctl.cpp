@@ -96,6 +96,33 @@ Keyboard DetectKeyboard() {
     return ReadFlag(g_modeFlag) == UZA_MODE_MANUAL ? Keyboard::Manual : Keyboard::Auto;
 }
 
+LANGID ForegroundLanguage() {
+    const HWND fg = GetForegroundWindow();
+    const DWORD tid = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
+    return LOWORD((DWORD)(ULONG_PTR)GetKeyboardLayout(tid));
+}
+
+// Only the modifier keys are looked at, never what is being typed.
+bool LanguageKeysDown() {
+    // "Language Hotkey": 1 = Left Alt+Shift (default), 2 = Ctrl+Shift, 3 = none.
+    static int choice = 0;
+    static DWORD readAt = 0;
+    if (!choice || GetTickCount() - readAt > 10000) {
+        wchar_t buf[8] = L"1";
+        DWORD size = sizeof buf;
+        RegGetValueW(HKEY_CURRENT_USER, L"Keyboard Layout\\Toggle", L"Language Hotkey", RRF_RT_REG_SZ, nullptr, buf, &size);
+        choice = buf[0] == L'2' ? 2 : buf[0] == L'3' || buf[0] == L'4' ? 3 : 1;
+        readAt = GetTickCount();
+    }
+    const bool alt = GetAsyncKeyState(VK_MENU) < 0, shift = GetAsyncKeyState(VK_SHIFT) < 0;
+    const bool ctrl = GetAsyncKeyState(VK_CONTROL) < 0;
+    const bool win = GetAsyncKeyState(VK_LWIN) < 0 || GetAsyncKeyState(VK_RWIN) < 0;
+    if (win) return false;
+    if (choice == 1) return alt && shift && !ctrl;
+    if (choice == 2) return ctrl && shift && !alt;
+    return false;
+}
+
 bool ProfilesEnabled() {
     if (!g_profiles) return false;
     int enabled = 0;

@@ -12,6 +12,7 @@
 #define IDC_INSTALL    1003
 #define IDC_AUTOSTART  1004
 #define IDC_AUTOUPDATE 1005
+#define IDC_CYCLE      1006
 
 // Tray menu commands.
 #define IDM_AUTO       2001

@@ -28,12 +28,15 @@ const UINT WM_APP_QUIT = WM_APP + 3;  // the uninstaller asks us to exit
 const UINT_PTR kStatusTimer = 1;
 const UINT_PTR kAfterSwitchTimer = 2;  // one-shot: record what the switch really did
 const UINT_PTR kUpdateTimer = 3;       // look for a new release
+const UINT_PTR kLanguageKeyTimer = 4;  // watch the Alt+Shift keys
 const UINT kFirstUpdateCheckMs = 20 * 1000;
 const UINT kUpdateIntervalMs = 6 * 60 * 60 * 1000;
+const UINT kLanguageKeyPollMs = 30;
+const DWORD kLanguageKeyWindowMs = 900;
 
 // Layout, in 96-dpi pixels.
 const int kClientW = 420;
-const int kClientH = 660;
+const int kClientH = 688;
 const int kHeaderH = 108;
 const int kMargin = 24;
 
@@ -66,6 +69,14 @@ bool g_updateMode = false;
 UpdateResult* g_update = nullptr;
 bool g_hotkeysOk = true;
 bool g_relaunchInstalled = false;
+
+// The Windows language key (Alt+Shift) only moves between languages, so on its
+// own it never reaches the second Uzbek keyboard. These track one press of it:
+// where the user was when the keys went down, and when they came up.
+bool g_langKeysHeld = false;
+DWORD g_langKeysReleasedAt = 0;
+Keyboard g_langKeysFrom = Keyboard::Other;
+LANGID g_langKeysFromLang = 0;
 int g_tick = 0;
 
 NOTIFYICONDATAW g_nid = {};
@@ -205,6 +216,7 @@ RECT ButtonRect(int id) {
         case IDC_INSTALL: return {S(kClientW - kMargin - 124), S(482), S(kClientW - kMargin), S(482 + 36)};
         case IDC_AUTOSTART: return {S(kMargin), S(530), S(kClientW - kMargin), S(530 + 24)};
         case IDC_AUTOUPDATE: return {S(kMargin), S(558), S(kClientW - kMargin), S(558 + 24)};
+        case IDC_CYCLE: return {S(kMargin), S(586), S(kClientW - kMargin), S(586 + 24)};
     }
     return {};
 }
@@ -213,7 +225,7 @@ void LayoutChildren() {
     if (g_uiFont) DeleteObject(g_uiFont);
     g_uiFont = CreateFontW(-S(14), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    for (int id : {IDC_AUTO, IDC_MANUAL, IDC_INSTALL, IDC_AUTOSTART, IDC_AUTOUPDATE}) {
+    for (int id : {IDC_AUTO, IDC_MANUAL, IDC_INSTALL, IDC_AUTOSTART, IDC_AUTOUPDATE, IDC_CYCLE}) {
         const HWND child = GetDlgItem(g_hwnd, id);
         if (!child) continue;
         const RECT r = ButtonRect(id);
@@ -265,6 +277,7 @@ void RefreshControls() {
     EnableWindow(GetDlgItem(g_hwnd, IDC_AUTOSTART), g_installed);
     Button_SetCheck(GetDlgItem(g_hwnd, IDC_AUTOSTART), g_installed && GetAutostart() ? BST_CHECKED : BST_UNCHECKED);
     Button_SetCheck(GetDlgItem(g_hwnd, IDC_AUTOUPDATE), GetAutoUpdate() ? BST_CHECKED : BST_UNCHECKED);
+    Button_SetCheck(GetDlgItem(g_hwnd, IDC_CYCLE), GetSetting(UZA_SETTING_CYCLE) ? BST_CHECKED : BST_UNCHECKED);
     InvalidateRect(g_hwnd, nullptr, FALSE);
     for (int id : {IDC_AUTO, IDC_MANUAL, IDC_INSTALL}) InvalidateRect(GetDlgItem(g_hwnd, id), nullptr, FALSE);
     TrayUpdate();
@@ -272,12 +285,41 @@ void RefreshControls() {
 
 bool IsOtherCopy() { return lstrcmpiW(SelfPath().c_str(), InstalledExePath().c_str()) != 0; }
 
+// Called when the active keyboard has just changed. If the Windows language
+// key caused it, add the stops Windows leaves out, so that pressing it goes
+//   other languages -> Avtomatik -> Qölda -> other languages
+// Leaving Avtomatik lands on Qölda first; arriving in Uzbek starts at Avtomatik.
+void StepWithLanguageKey(Keyboard now) {
+    const bool recent = g_langKeysHeld ||
+                        (g_langKeysReleasedAt && GetTickCount() - g_langKeysReleasedAt < kLanguageKeyWindowMs);
+    if (!recent || !GetSetting(UZA_SETTING_CYCLE)) return;
+
+    Keyboard next = Keyboard::Other;
+    if (g_langKeysFrom == Keyboard::Auto && ForegroundLanguage() != UZA_LANGID) {
+        next = Keyboard::Manual;
+    } else if (g_langKeysFromLang != UZA_LANGID && now == Keyboard::Manual) {
+        next = Keyboard::Auto;
+    }
+    if (next == Keyboard::Other) return;
+
+    // One correction per key press. No window is activated: the user stays
+    // in the program they are typing in.
+    g_langKeysReleasedAt = 0;
+    g_langKeysHeld = false;
+    g_langKeysFrom = Keyboard::Other;
+    Log(L"language key: stepping to %s", next == Keyboard::Manual ? L"manual" : L"auto");
+    SwitchKeyboard(next);
+}
+
 void RefreshState(bool force) {
     const bool installed = IsInstalled();
     const Keyboard active = installed ? DetectKeyboard() : Keyboard::Other;
     const bool update = installed && IsOtherCopy();
     if (!force && installed == g_installed && active == g_active && update == g_updateMode) return;
-    if (active != g_active) LogInputState(L"keyboard changed");
+    if (active != g_active) {
+        LogInputState(L"keyboard changed");
+        StepWithLanguageKey(active);
+    }
     g_installed = installed;
     g_active = active;
     g_updateMode = update;
@@ -383,11 +425,11 @@ void PaintWindow(HDC hdc) {
     // Footer.
     {
         Pen sep(kLine, 1);
-        g.DrawLine(&sep, M, F(598), W - M, F(598));
-        Text(g, L"Dasturçi: " UZA_DEVELOPER, F(12.5f), Regular, kInk2, M, F(610));
-        const REAL emailW = Text(g, UZA_EMAIL, F(12.5f), Regular, kAccent, M, F(630));
-        g_emailRect = {(LONG)M, (LONG)F(628), (LONG)(M + emailW), (LONG)F(648)};
-        Text(g, L"v" UZA_VERSION_W, F(12.5f), Regular, kFaint, W - M - F(40), F(610));
+        g.DrawLine(&sep, M, F(626), W - M, F(626));
+        Text(g, L"Dasturçi: " UZA_DEVELOPER, F(12.5f), Regular, kInk2, M, F(638));
+        const REAL emailW = Text(g, UZA_EMAIL, F(12.5f), Regular, kAccent, M, F(658));
+        g_emailRect = {(LONG)M, (LONG)F(656), (LONG)(M + emailW), (LONG)F(676)};
+        Text(g, L"v" UZA_VERSION_W, F(12.5f), Regular, kFaint, W - M - F(40), F(638));
     }
 }
 
@@ -609,6 +651,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             CreateWindowExW(0, L"BUTTON", L"Yangilanişlarni avtomatik tekşiriş",
                             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, 0, 0, 0, 0, hwnd,
                             (HMENU)(INT_PTR)IDC_AUTOUPDATE, g_inst, nullptr);
+            CreateWindowExW(0, L"BUTTON", L"Alt+Shift: Avtomatik → Qölda → boşqa til",
+                            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, 0, 0, 0, 0, hwnd,
+                            (HMENU)(INT_PTR)IDC_CYCLE, g_inst, nullptr);
             SizeWindowToClient();
             LayoutChildren();
 
@@ -634,6 +679,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             RefreshControls();
             SetTimer(hwnd, kStatusTimer, 400, nullptr);
             SetTimer(hwnd, kUpdateTimer, kFirstUpdateCheckMs, nullptr);
+            SetTimer(hwnd, kLanguageKeyTimer, kLanguageKeyPollMs, nullptr);
             return 0;
         }
 
@@ -647,6 +693,23 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             } else if (wp == kAfterSwitchTimer) {
                 KillTimer(hwnd, kAfterSwitchTimer);
                 LogInputState(L"after switch");
+            } else if (wp == kLanguageKeyTimer) {
+                if (!g_installed) return 0;
+                const bool held = LanguageKeysDown();
+                if (held && !g_langKeysHeld) {
+                    RefreshState(false);  // know exactly where the user is now
+                    g_langKeysHeld = true;
+                    g_langKeysFrom = g_active;
+                    g_langKeysFromLang = ForegroundLanguage();
+                } else if (!held && g_langKeysHeld) {
+                    g_langKeysHeld = false;
+                    g_langKeysReleasedAt = GetTickCount() | 1;
+                }
+                // Right after a press, look for the change at once instead of
+                // waiting for the slower status timer.
+                if (g_langKeysReleasedAt && GetTickCount() - g_langKeysReleasedAt < kLanguageKeyWindowMs) {
+                    RefreshState(false);
+                }
             } else if (wp == kUpdateTimer) {
                 SetTimer(hwnd, kUpdateTimer, kUpdateIntervalMs, nullptr);
                 if (g_installed && GetAutoUpdate()) StartUpdateCheck(hwnd, false);
@@ -714,6 +777,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     if (on && g_installed) StartUpdateCheck(hwnd, false);
                     break;
                 }
+                case IDC_CYCLE:
+                    SetSetting(UZA_SETTING_CYCLE, Button_GetCheck(GetDlgItem(hwnd, IDC_CYCLE)) == BST_CHECKED);
+                    break;
                 case IDM_CHECKUPDATE: StartUpdateCheck(hwnd, true); break;
                 case IDM_OPEN: ShowMain(true); break;
                 case IDM_EXIT: DestroyWindow(hwnd); break;
@@ -785,6 +851,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_DESTROY:
             KillTimer(hwnd, kStatusTimer);
             KillTimer(hwnd, kUpdateTimer);
+            KillTimer(hwnd, kLanguageKeyTimer);
             RestoreClipboardNow(hwnd);
             UnregisterConvertHotkeys(hwnd);
             TrayRemove();
