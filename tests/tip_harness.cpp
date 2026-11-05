@@ -66,6 +66,7 @@ static bool keyFor(wchar_t c, KeyDef& k) {
         {0x02, L"1234567890-=", L"!@#$%^&*()_+"},
         {0x10, L"qwertyuiop[]", L"QWERTYUIOP{}"},
         {0x1E, L"asdfghjkl;'`", L"ASDFGHJKL:\"~"},
+        {0x2B, L"\\", L"|"},
         {0x2C, L"zxcvbnm,./", L"ZXCVBNM<>?"},
         {0x39, L" ", L" "},
     };
@@ -91,6 +92,7 @@ static bool keyFor(wchar_t c, KeyDef& k) {
                     case L';': k.vk = VK_OEM_1; break;
                     case L'\'': k.vk = VK_OEM_7; break;
                     case L'`': k.vk = VK_OEM_3; break;
+                    case L'\\': k.vk = VK_OEM_5; break;
                     case L',': k.vk = VK_OEM_COMMA; break;
                     case L'.': k.vk = VK_OEM_PERIOD; break;
                     case L'/': k.vk = VK_OEM_2; break;
@@ -102,6 +104,13 @@ static bool keyFor(wchar_t c, KeyDef& k) {
     }
     return false;
 }
+
+// The text service's private interface for choosing its keyboard (see
+// src/tip/textservice.h); the installed product gets the mode from the
+// profile Windows activates.
+struct __declspec(uuid("08E01424-6802-4FF1-8190-3CE8DEACC6CB")) IUzAlphaMode : IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE SetManual(BOOL manual) = 0;
+};
 
 // Wraps the DLL's class factory to keep hold of the instance TSF creates.
 struct SpyFactory : IClassFactory {
@@ -139,6 +148,7 @@ struct Harness {
     // directly lets the test run in the background without stealing focus.
     ITfKeyEventSink* keys = nullptr;
     ITfTextInputProcessorEx* tip = nullptr;
+    IUzAlphaMode* mode = nullptr;  // picks the Automatic or the Manual keyboard
 
     ITfContext* context() {
         ITfDocumentMgr* dm = nullptr;
@@ -185,7 +195,12 @@ struct Harness {
             } else if (arrow) {
                 SendMessageW(edit, WM_KEYDOWN, k.vk, lp);
             } else {
-                SendMessageW(edit, WM_CHAR, c, lp);
+                // What the keyboard layout underneath types for this key.
+                BYTE state[256] = {};
+                if (k.shift) state[VK_SHIFT] = 0x80;
+                WCHAR buf[8] = {};
+                const int n = ToUnicodeEx(k.vk, k.scan, state, buf, ARRAYSIZE(buf), 0x4, GetKeyboardLayout(0));
+                SendMessageW(edit, WM_CHAR, n == 1 ? buf[0] : c, lp);
             }
         }
         setShift(false);
@@ -208,16 +223,18 @@ struct Harness {
     }
 };
 
-static void expect(Harness& h, const wchar_t* keys, const wchar_t* want) {
+static void expect(Harness& h, const wchar_t* keys, const wchar_t* want, bool manual = false) {
     ++g_checks;
     h.clear();
+    if (h.mode) h.mode->SetManual(manual ? TRUE : FALSE);
     for (const wchar_t* p = keys; *p; ++p) h.press(*p);
     const std::wstring got = h.text();
     const bool ok = got == want;
     if (!ok) ++g_failed;
-    fprintf(g_log, "%s  \"%s\" -> \"%s\"%s%s%s\n", ok ? "ok  " : "FAIL", esc(keys).c_str(),
-            esc(got).c_str(), ok ? "" : "  (want \"", ok ? "" : esc(want).c_str(), ok ? "" : "\")");
+    fprintf(g_log, "%s  %s\"%s\" -> \"%s\"%s%s%s\n", ok ? "ok  " : "FAIL", manual ? "[manual] " : "",
+            esc(keys).c_str(), esc(got).c_str(), ok ? "" : "  (want \"", ok ? "" : esc(want).c_str(), ok ? "" : "\")");
     fflush(g_log);
+    if (h.mode) h.mode->SetManual(FALSE);
 }
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
@@ -366,6 +383,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
         fclose(g_log);
         return 2;
     }
+    spy.last->QueryInterface(__uuidof(IUzAlphaMode), (void**)&h.mode);
+    fprintf(g_log, "mode switch available: %s\n", h.mode ? "yes" : "NO");
     {
         ITfKeystrokeMgr* km = nullptr;
         CLSID fg = {};
@@ -414,6 +433,22 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     expect(h, L"ma \x02\x02\x02'", L"'ma ");
     expect(h, L"Yangi o'zbek alifbosi uchun", L"Yangi özbek alifbosi uçun");
 
+    // The Manual keyboard: the kiritish.uz keys, no digraphs.
+    if (h.mode) {
+        expect(h, L";'[]", L"şçöğ", true);
+        expect(h, L":\"{}", L"ŞÇÖĞ", true);
+        expect(h, L"`~\\|", L"ʼ\";:", true);
+        expect(h, L"sh ch o'", L"sh ch oç", true);
+        expect(h, L"bo;qa ya[ni to]ri", L"boşqa yaöni toğri", true);
+        expect(h, L"a;\b\b", L"", true);
+        // Back on Automatic the same keys are ordinary again.
+        expect(h, L"a; [b]", L"a; [b]");
+    } else {
+        ++g_checks;
+        ++g_failed;
+        fprintf(g_log, "FAIL  the text service does not expose its mode switch\n");
+    }
+
     fprintf(g_log, "%d checks, %d failed\n", g_checks, g_failed);
 
     profiles->DeactivateProfile(TF_PROFILETYPE_INPUTPROCESSOR, lang, CLSID_HarnessTip, GUID_HarnessProfile,
@@ -421,6 +456,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     profiles->UnregisterProfile(CLSID_HarnessTip, lang, GUID_HarnessProfile, TF_URP_LOCALPROCESS);
     profiles->Release();
     pump();
+    if (h.mode) h.mode->Release();
     h.keys->Release();
     if (spy.last) spy.last->Release();
     CoRevokeClassObject(classCookie);

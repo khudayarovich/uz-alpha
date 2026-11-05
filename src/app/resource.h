@@ -5,8 +5,6 @@
 // Payload: the DLLs the installer puts on the machine.
 #define IDR_TIP_X64    201
 #define IDR_TIP_X86    202
-#define IDR_KBD_X64    203
-#define IDR_KBD_WOW64  204
 
 // Child controls of the main window.
 #define IDC_AUTO       1001

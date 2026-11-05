@@ -618,8 +618,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_installed = IsInstalled();
             g_updateMode = g_installed && IsOtherCopy();
             // Repair a user profile where the keyboards are installed on the
-            // machine but the Auto profile is not enabled for this user.
-            if (g_installed && !AutoProfileEnabled()) EnableForUser();
+            // machine but not enabled for this user (a fresh update, or another
+            // account on the PC), and drop what an older version left behind.
+            if (g_installed) {
+                if (ProfilesEnabled()) {
+                    CleanUserList();
+                } else {
+                    EnableForUser();
+                }
+            }
             g_active = g_installed ? DetectKeyboard() : Keyboard::Other;
             LogInputState(L"start");
             TrayAdd();
@@ -821,6 +828,14 @@ int APIENTRY wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR cmdLine, int) {
     const std::wstring args = cmdLine ? cmdLine : L"";
 
     // Elevated helper modes: no window, just the work and an exit code.
+    {
+        int argc = 0;
+        wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        for (int i = 1; argv && i + 2 < argc; ++i) {
+            if (lstrcmpiW(argv[i], L"/apply-update") == 0) return ApplyUpdateElevated(argv[i + 1], argv[i + 2]);
+        }
+        if (argv) LocalFree(argv);
+    }
     if (args.find(L"/install-machine") != std::wstring::npos) return MachineInstall();
     if (args.find(L"/uninstall-machine") != std::wstring::npos) return MachineUninstall();
 

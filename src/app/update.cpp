@@ -95,7 +95,8 @@ bool HttpGet(const std::wstring& url, std::vector<BYTE>* body, HANDLE file, size
     return ok;
 }
 
-// Lower-case hex SHA-256 of a file; empty on failure.
+}  // namespace
+
 std::wstring FileSha256(const std::wstring& path) {
     std::wstring hex;
     const HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
@@ -128,6 +129,8 @@ std::wstring FileSha256(const std::wstring& path) {
     CloseHandle(f);
     return hex;
 }
+
+namespace {
 
 // "key=value" lines.
 std::wstring InfoValue(const std::string& text, const char* key) {
@@ -303,7 +306,23 @@ bool ApplyUpdate(HWND owner, const UpdateResult& update, std::wstring* error) {
         DeleteFileW(update.path.c_str());
         return false;
     }
-    return InstallFrom(owner, update.path, error);
+    // Windows asks permission for this program, the copy the user already
+    // installed and knows, not for an unfamiliar file in a download folder.
+    // The elevated copy verifies the download again and lets it install itself.
+    const std::wstring args = L"/apply-update \"" + update.path + L"\" " + update.sha256;
+    DWORD code = 0;
+    bool cancelled = false;
+    if (!RunSelfElevated(owner, args, &code, &cancelled)) {
+        if (!cancelled) *error = L"Örnatuvçini işga tuşirib bölmadi.";
+        return false;
+    }
+    if (code != 0) {
+        wchar_t buf[128];
+        swprintf_s(buf, L"Yangilaşda xatolik yuz berdi (kod %lu).", code);
+        *error = buf;
+        return false;
+    }
+    return true;  // the new copy adds its keyboards to the user's list when it starts
 }
 
 bool GetAutoUpdate() {

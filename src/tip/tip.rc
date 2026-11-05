@@ -2,9 +2,11 @@
 #include <winres.h>
 #include "../common/version.h"
 
-// File icon only. The profile is registered without an icon on purpose, so
-// the taskbar shows the language code rather than a logo.
-1 ICON "../../assets/uzalpha.ico"
+// The icons Windows shows for the two keyboards in its switcher: just the
+// letters UZA and UZM, so they read like Windows' own language codes.
+// Their order here is their index in RegisterProfile (0 = UZA, 1 = UZM).
+1 ICON "../../assets/uza.ico"
+2 ICON "../../assets/uzm.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION UZA_VER_MAJOR, UZA_VER_MINOR, UZA_VER_PATCH, 0
@@ -20,7 +22,7 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "Farrukh Yuldashev"
-            VALUE "FileDescription", "UzAlpha — Özbekça (lotin, avtomatik) input method"
+            VALUE "FileDescription", "UzAlpha — Özbekça (lotin) input method"
             VALUE "FileVersion", UZA_VER_STR
             VALUE "InternalName", "UzAlphaTip"
             VALUE "LegalCopyright", "(c) 2026 Farrukh Yuldashev"

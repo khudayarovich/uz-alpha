@@ -1,4 +1,5 @@
-// Which keyboard is active, and switching between Auto and Manual.
+// Which keyboard is active, and switching between Avtomatik and Qölda.
+// Both are language profiles of the UzAlpha text service.
 #include "app.h"
 
 #include <msctf.h>
@@ -8,24 +9,25 @@ namespace {
 ITfThreadMgr* g_threadMgr = nullptr;
 TfClientId g_clientId = TF_CLIENTID_NULL;
 ITfInputProcessorProfileMgr* g_profiles = nullptr;
-// Set by the Auto text service to the thread it is active and focused on.
+// Set by the text service: the thread it is active and focused on, and which
+// of the two keyboards that thread is typing with.
 ITfCompartment* g_activeFlag = nullptr;
+ITfCompartment* g_modeFlag = nullptr;
 
-DWORD ManualHkl() {
-    DWORD hkl = 0;
-    return FindManualLayout(nullptr, &hkl) ? hkl : 0;
-}
-
-// The thread the Auto text service reports itself active on, or 0.
-LONG AutoThread() {
-    if (!g_activeFlag) return 0;
+LONG ReadFlag(ITfCompartment* flag) {
+    if (!flag) return 0;
     VARIANT v;
     VariantInit(&v);
-    LONG tid = 0;
-    if (SUCCEEDED(g_activeFlag->GetValue(&v)) && v.vt == VT_I4) tid = v.lVal;
+    LONG value = 0;
+    if (SUCCEEDED(flag->GetValue(&v)) && v.vt == VT_I4) value = v.lVal;
     VariantClear(&v);
-    if (!tid) return 0;
+    return value;
+}
 
+// The thread the text service reports itself active on, or 0.
+LONG ActiveThread() {
+    const LONG tid = ReadFlag(g_activeFlag);
+    if (!tid) return 0;
     // A program that was killed never cleared its flag: ignore dead threads.
     const HANDLE thread = OpenThread(SYNCHRONIZE, FALSE, (DWORD)tid);
     if (!thread) return GetLastError() == ERROR_ACCESS_DENIED ? tid : 0;  // alive but protected
@@ -34,23 +36,18 @@ LONG AutoThread() {
     return alive ? tid : 0;
 }
 
+const GUID& ProfileOf(Keyboard k) { return k == Keyboard::Manual ? GUID_UzAlphaManualProfile : GUID_UzAlphaProfile; }
+
 HRESULT Activate(Keyboard k, DWORD flags) {
-    if (k == Keyboard::Auto) {
-        return g_profiles->ActivateProfile(TF_PROFILETYPE_INPUTPROCESSOR, UZA_LANGID, CLSID_UzAlphaTip,
-                                           GUID_UzAlphaProfile, nullptr, flags);
-    }
-    const DWORD hkl = ManualHkl();
-    if (!hkl) return E_FAIL;
-    // Layout handles are sign-extended 32-bit values.
-    return g_profiles->ActivateProfile(TF_PROFILETYPE_KEYBOARDLAYOUT, UZA_LANGID, CLSID_NULL, GUID_NULL,
-                                       (HKL)(LONG_PTR)(LONG)hkl, flags);
+    return g_profiles->ActivateProfile(TF_PROFILETYPE_INPUTPROCESSOR, UZA_LANGID, CLSID_UzAlphaTip, ProfileOf(k),
+                                       nullptr, flags);
 }
 
 }  // namespace
 
 bool InputInit() {
     // Our own TSF presence: needed to switch profiles for the whole session
-    // and to read the text service's "active" flag.
+    // and to read the text service's flags.
     if (SUCCEEDED(CoCreateInstance(CLSID_TF_ThreadMgr, nullptr, CLSCTX_INPROC_SERVER, __uuidof(ITfThreadMgr),
                                    (void**)&g_threadMgr)) &&
         g_threadMgr) {
@@ -63,24 +60,26 @@ bool InputInit() {
         ITfCompartmentMgr* mgr = nullptr;
         if (SUCCEEDED(g_threadMgr->GetGlobalCompartment(&mgr)) && mgr) {
             mgr->GetCompartment(GUID_UzAlphaActiveCompartment, &g_activeFlag);
+            mgr->GetCompartment(GUID_UzAlphaModeCompartment, &g_modeFlag);
             mgr->Release();
         }
     }
     CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr, CLSCTX_INPROC_SERVER,
                      __uuidof(ITfInputProcessorProfileMgr), (void**)&g_profiles);
-    Log(L"input init: thread manager %s, profiles %s, flag %s", g_threadMgr ? L"ok" : L"no",
-        g_profiles ? L"ok" : L"no", g_activeFlag ? L"ok" : L"no");
+    Log(L"input init: thread manager %s, profiles %s, flags %s", g_threadMgr ? L"ok" : L"no",
+        g_profiles ? L"ok" : L"no", (g_activeFlag && g_modeFlag) ? L"ok" : L"no");
     return g_profiles != nullptr;
 }
 
 void InputShutdown() {
     if (g_activeFlag) g_activeFlag->Release();
+    if (g_modeFlag) g_modeFlag->Release();
     if (g_profiles) g_profiles->Release();
     if (g_threadMgr) {
         g_threadMgr->Deactivate();
         g_threadMgr->Release();
     }
-    g_activeFlag = nullptr;
+    g_activeFlag = g_modeFlag = nullptr;
     g_profiles = nullptr;
     g_threadMgr = nullptr;
 }
@@ -92,35 +91,27 @@ Keyboard DetectKeyboard() {
 
     // Any other language: UzAlpha is simply not involved.
     if (LOWORD(hkl) != UZA_LANGID) return Keyboard::Other;
-
-    const DWORD manual = ManualHkl();
-    if (manual && hkl == manual) return Keyboard::Manual;
-
-    // The text service says where it is working.
-    if (AutoThread() != 0) return Keyboard::Auto;
-
-    // Without that flag (a sandboxed app may not be able to set it): Uzbek
-    // with a plain, non-custom layout handle can only be the text service.
-    if (!g_activeFlag && (HIWORD(hkl) & 0xF000) != 0xF000) return Keyboard::Auto;
-    return Keyboard::Other;
+    // The text service says where it is working, and in which mode.
+    if (ActiveThread() == 0) return Keyboard::Other;
+    return ReadFlag(g_modeFlag) == UZA_MODE_MANUAL ? Keyboard::Manual : Keyboard::Auto;
 }
 
-bool AutoProfileEnabled() {
+bool ProfilesEnabled() {
     if (!g_profiles) return false;
-    bool enabled = false;
+    int enabled = 0;
     IEnumTfInputProcessorProfiles* en = nullptr;
     if (SUCCEEDED(g_profiles->EnumProfiles(UZA_LANGID, &en)) && en) {
         TF_INPUTPROCESSORPROFILE p = {};
         ULONG got = 0;
         while (en->Next(1, &p, &got) == S_OK && got == 1) {
-            if (p.dwProfileType == TF_PROFILETYPE_INPUTPROCESSOR && IsEqualCLSID(p.clsid, CLSID_UzAlphaTip)) {
-                enabled = (p.dwFlags & TF_IPP_FLAG_ENABLED) != 0;
-                break;
+            if (p.dwProfileType == TF_PROFILETYPE_INPUTPROCESSOR && IsEqualCLSID(p.clsid, CLSID_UzAlphaTip) &&
+                (p.dwFlags & TF_IPP_FLAG_ENABLED)) {
+                ++enabled;
             }
         }
         en->Release();
     }
-    return enabled;
+    return enabled >= 2;
 }
 
 void LogInputState(const wchar_t* why) {
@@ -129,10 +120,11 @@ void LogInputState(const wchar_t* why) {
     const DWORD hkl = (DWORD)(ULONG_PTR)GetKeyboardLayout(tid);
     TF_INPUTPROCESSORPROFILE active = {};
     const HRESULT hr = g_profiles ? g_profiles->GetActiveProfile(GUID_TFCAT_TIP_KEYBOARD, &active) : E_FAIL;
-    Log(L"%s: foreground hkl=%08lx | our thread: profile type=%lu ours=%d lang=%04x (hr %08lx) | flag=%ld | "
-        L"auto enabled=%d | service loaded here=%d",
-        why, hkl, active.dwProfileType, (int)IsEqualCLSID(active.clsid, CLSID_UzAlphaTip), active.langid, hr,
-        AutoThread(), (int)AutoProfileEnabled(), (int)(GetModuleHandleW(UZA_TIP_DLL) != nullptr));
+    Log(L"%s: foreground hkl=%08lx | our thread: profile type=%lu ours=%d manual=%d lang=%04x (hr %08lx) | "
+        L"active thread=%ld mode=%ld | enabled=%d | service loaded here=%d",
+        why, hkl, active.dwProfileType, (int)IsEqualCLSID(active.clsid, CLSID_UzAlphaTip),
+        (int)IsEqualGUID(active.guidProfile, GUID_UzAlphaManualProfile), active.langid, hr, ActiveThread(),
+        ReadFlag(g_modeFlag), (int)ProfilesEnabled(), (int)(GetModuleHandleW(UZA_TIP_DLL) != nullptr));
 }
 
 bool SwitchKeyboard(Keyboard k) {
@@ -140,21 +132,14 @@ bool SwitchKeyboard(Keyboard k) {
 
     // Windows will happily "activate" a profile it has marked disabled and
     // then fall back to a plain layout, so make sure of it first.
-    if (k == Keyboard::Auto && !AutoProfileEnabled()) {
-        Log(L"the Auto profile is not enabled for this user: enabling it");
+    if (!ProfilesEnabled()) {
+        Log(L"the keyboards are not enabled for this user: enabling them");
         EnableForUser();
     }
 
     HRESULT hr = Activate(k, TF_IPPMF_FORSESSION);
     Log(L"switch to %s: %08lx", k == Keyboard::Auto ? L"auto" : L"manual", hr);
     if (hr == S_OK) return true;
-
-    // Not in this user's keyboard list (yet)?
-    if (EnableForUser()) {
-        hr = Activate(k, TF_IPPMF_FORSESSION);
-        Log(L"  after enabling for the user: %08lx", hr);
-        if (hr == S_OK) return true;
-    }
 
     // The session is on another input language: move it to Uzbek first.
     ITfInputProcessorProfiles* legacy = nullptr;

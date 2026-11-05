@@ -19,25 +19,29 @@ std::wstring InstalledExePath();
 
 // Are the keyboards registered on this machine?
 bool IsInstalled();
-// The Manual layout's registry id (KLID, e.g. "a0010443") and its HKL.
-bool FindManualLayout(std::wstring* klid, DWORD* hkl);
 
 // Machine-level work; must run elevated. Return a process exit code (0 = ok).
 int MachineInstall();
 int MachineUninstall();
+// UzAlpha.exe /apply-update "<downloaded exe>" <sha256>
+int ApplyUpdateElevated(const std::wstring& file, const std::wstring& sha256);
+
+// Starts this program again elevated with `args` and waits for it. Returns
+// false if it could not be started; `cancelled` then says whether the user
+// declined the Windows prompt.
+bool RunSelfElevated(HWND owner, const std::wstring& args, DWORD* exitCode, bool* cancelled);
 
 // Whole flows, started from the normal (unelevated) instance. `owner` gets the
 // UAC prompt. On failure `error` holds a message for the user; a declined UAC
 // prompt returns false with an empty message.
 bool InstallEverything(HWND owner, std::wstring* error);
 bool UninstallEverything(HWND owner, std::wstring* error);
-// Installs from another copy of the program (a downloaded update): that copy
-// runs elevated and puts itself and its DLLs in place.
-bool InstallFrom(HWND owner, const std::wstring& exe, std::wstring* error);
 
 // Put our two keyboards into / take them out of the current user's list.
 bool EnableForUser();
 void DisableForUser();
+// Remove what an older UzAlpha left in the user's list.
+void CleanUserList();
 
 bool GetAutostart();
 void SetAutostart(bool on);
@@ -52,8 +56,8 @@ Keyboard DetectKeyboard();
 // Make `k` (Auto or Manual) the active keyboard for the session. Must be
 // called while one of our own windows has the focus.
 bool SwitchKeyboard(Keyboard k);
-// Does TSF consider the Auto profile enabled for this user?
-bool AutoProfileEnabled();
+// Does TSF consider both of our keyboards enabled for this user?
+bool ProfilesEnabled();
 // Writes what Windows reports about the active keyboard to the log.
 void LogInputState(const wchar_t* why);
 
@@ -75,6 +79,8 @@ struct UpdateResult {
 void StartUpdateCheck(HWND notify, bool manual);
 // Checks the downloaded file once more and installs it (UAC prompt).
 bool ApplyUpdate(HWND owner, const UpdateResult& update, std::wstring* error);
+// Lower-case hex SHA-256 of a file; empty on failure.
+std::wstring FileSha256(const std::wstring& path);
 
 bool GetAutoUpdate();
 void SetAutoUpdate(bool on);

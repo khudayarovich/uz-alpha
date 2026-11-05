@@ -12,23 +12,33 @@ extern HINSTANCE g_hInst;
 void DllAddRef();
 void DllRelease();
 
-// What one key press means to the engine, plus what the active keyboard
-// layout would type for it.
+// The two keyboards this service provides; each is a TSF language profile.
+enum class Mode { Auto, Manual };
+
+// What one key press means, plus what the keyboard layout Windows put
+// underneath the service would type for it.
 struct KeyInfo {
     uza::Key key;
-    wchar_t usChar = 0;  // the US-English character of this physical key (0 if none)
-    // True when the base layout would type something other than the US
-    // character: the text service then types the US character itself, so Auto
-    // is always plain QWERTY whatever layout Windows put underneath it.
+    wchar_t wanted = 0;  // the character this key should type in the current mode (0 if none)
+    // True when the base layout would type something else: the text service
+    // then types `wanted` itself. That is how Manual moves its keys, and how
+    // both keyboards stay US QWERTY whatever layout sits underneath.
     bool overrideLayout = false;
+};
+
+// Lets the test harness pick the keyboard without registering the real profiles.
+struct __declspec(uuid("08E01424-6802-4FF1-8190-3CE8DEACC6CB")) IUzAlphaMode : IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE SetManual(BOOL manual) = 0;
 };
 
 class TextService : public ITfTextInputProcessorEx,
                     public ITfThreadMgrEventSink,
                     public ITfThreadFocusSink,
+                    public ITfActiveLanguageProfileNotifySink,
                     public ITfKeyEventSink,
                     public ITfCompositionSink,
-                    public ITfDisplayAttributeProvider {
+                    public ITfDisplayAttributeProvider,
+                    public IUzAlphaMode {
 public:
     TextService();
 
@@ -52,6 +62,12 @@ public:
     // ITfThreadFocusSink
     STDMETHODIMP OnSetThreadFocus() override;
     STDMETHODIMP OnKillThreadFocus() override;
+
+    // ITfActiveLanguageProfileNotifySink: the user moved between our two keyboards
+    STDMETHODIMP OnActivated(REFCLSID clsid, REFGUID profile, BOOL activated) override;
+
+    // IUzAlphaMode
+    STDMETHODIMP SetManual(BOOL manual) override;
 
     // ITfKeyEventSink
     STDMETHODIMP OnSetFocus(BOOL foreground) override;
@@ -84,6 +100,8 @@ private:
     void RequestInputScope(ITfContext* ctx);
     void SyncPrevious(ITfContext* ctx, const KeyInfo& ki);
     void PublishActive(bool active);
+    void SetMode(Mode mode);
+    void ReadActiveProfile();
 
     HRESULT StartComposition(TfEditCookie ec, ITfContext* ctx);
     HRESULT SetCompositionText(TfEditCookie ec, ITfContext* ctx, const wchar_t* text);
@@ -96,8 +114,10 @@ private:
     TfClientId clientId_ = TF_CLIENTID_NULL;
     DWORD threadMgrSinkCookie_ = TF_INVALID_COOKIE;
     DWORD threadFocusSinkCookie_ = TF_INVALID_COOKIE;
+    DWORD profileSinkCookie_ = TF_INVALID_COOKIE;
     bool keySinkAdvised_ = false;
 
+    Mode mode_ = Mode::Auto;
     uza::Engine engine_;
     ITfComposition* composition_ = nullptr;
     ITfContext* compositionCtx_ = nullptr;  // context that owns composition_
@@ -111,7 +131,7 @@ private:
 };
 
 // Key classification (keys.cpp).
-KeyInfo ClassifyKey(WPARAM vk, LPARAM lp);
+KeyInfo ClassifyKey(WPARAM vk, LPARAM lp, Mode mode);
 
 // Display attribute objects (displayattr.cpp).
 HRESULT CreateDisplayAttributeInfo(ITfDisplayAttributeInfo** ppInfo);

@@ -10,8 +10,6 @@ IDI_APP ICON "../../assets/uzalpha.ico"
 // The installer payload (built before the app, see build.cmd).
 IDR_TIP_X64   RCDATA "../../build/tip/x64/UzAlphaTip.dll"
 IDR_TIP_X86   RCDATA "../../build/tip/x86/UzAlphaTip.dll"
-IDR_KBD_X64   RCDATA "../../build/kbd/x64/kbduzalp.dll"
-IDR_KBD_WOW64 RCDATA "../../build/kbd/wow64/kbduzalp.dll"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION UZA_VER_MAJOR, UZA_VER_MINOR, UZA_VER_PATCH, 0

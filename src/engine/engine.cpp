@@ -18,8 +18,8 @@ bool completes(wchar_t first, wchar_t c) {
         case L's': case L'S': case L'c': case L'C':
             return c == L'h' || c == L'H';
         case L'o': case L'O': case L'g': case L'G':
-            // o' and o` are both in common use for oʻ.
-            return c == kApostrophe || c == kGrave;
+            // People write the mark in oʻ many ways: o' o` o‘ o’ oʻ oʼ.
+            return c == kApostrophe || c == kGrave || c == 0x2018 || c == 0x2019 || c == 0x02BB || c == kTutuq;
     }
     return false;
 }

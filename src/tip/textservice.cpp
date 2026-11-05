@@ -138,6 +138,10 @@ STDMETHODIMP TextService::QueryInterface(REFIID riid, void** ppv) {
         *ppv = static_cast<ITfThreadMgrEventSink*>(this);
     } else if (IsEqualIID(riid, __uuidof(ITfThreadFocusSink))) {
         *ppv = static_cast<ITfThreadFocusSink*>(this);
+    } else if (IsEqualIID(riid, __uuidof(ITfActiveLanguageProfileNotifySink))) {
+        *ppv = static_cast<ITfActiveLanguageProfileNotifySink*>(this);
+    } else if (IsEqualIID(riid, __uuidof(IUzAlphaMode))) {
+        *ppv = static_cast<IUzAlphaMode*>(this);
     } else if (IsEqualIID(riid, __uuidof(ITfKeyEventSink))) {
         *ppv = static_cast<ITfKeyEventSink*>(this);
     } else if (IsEqualIID(riid, __uuidof(ITfCompositionSink))) {
@@ -180,8 +184,13 @@ STDMETHODIMP TextService::ActivateEx(ITfThreadMgr* tm, TfClientId tid, DWORD) {
                                       static_cast<ITfThreadFocusSink*>(this), &threadFocusSinkCookie_))) {
             threadFocusSinkCookie_ = TF_INVALID_COOKIE;
         }
+        if (FAILED(source->AdviseSink(__uuidof(ITfActiveLanguageProfileNotifySink),
+                                      static_cast<ITfActiveLanguageProfileNotifySink*>(this), &profileSinkCookie_))) {
+            profileSinkCookie_ = TF_INVALID_COOKIE;
+        }
         source->Release();
     }
+    ReadActiveProfile();
 
     ITfKeystrokeMgr* keys = nullptr;
     if (SUCCEEDED(tm->QueryInterface(__uuidof(ITfKeystrokeMgr), (void**)&keys))) {
@@ -246,9 +255,10 @@ STDMETHODIMP TextService::Deactivate() {
         if (SUCCEEDED(threadMgr_->QueryInterface(__uuidof(ITfSource), (void**)&source))) {
             if (threadMgrSinkCookie_ != TF_INVALID_COOKIE) source->UnadviseSink(threadMgrSinkCookie_);
             if (threadFocusSinkCookie_ != TF_INVALID_COOKIE) source->UnadviseSink(threadFocusSinkCookie_);
+            if (profileSinkCookie_ != TF_INVALID_COOKIE) source->UnadviseSink(profileSinkCookie_);
             source->Release();
         }
-        threadMgrSinkCookie_ = threadFocusSinkCookie_ = TF_INVALID_COOKIE;
+        threadMgrSinkCookie_ = threadFocusSinkCookie_ = profileSinkCookie_ = TF_INVALID_COOKIE;
 
         threadMgr_->Release();
         threadMgr_ = nullptr;
@@ -282,7 +292,69 @@ void TextService::PublishActive(bool active) {
         }
         c->Release();
     }
+    if (active) {
+        // And which of the two keyboards it is.
+        ITfCompartment* m = nullptr;
+        if (SUCCEEDED(mgr->GetCompartment(GUID_UzAlphaModeCompartment, &m)) && m) {
+            VARIANT v;
+            VariantInit(&v);
+            v.vt = VT_I4;
+            v.lVal = mode_ == Mode::Manual ? UZA_MODE_MANUAL : UZA_MODE_AUTO;
+            m->SetValue(clientId_, &v);
+            m->Release();
+        }
+    }
     mgr->Release();
+}
+
+// ---------------------------------------------------------------------------
+// Which keyboard: Auto or Manual
+
+void TextService::SetMode(Mode mode) {
+    if (mode != mode_) {
+        if (composition_) RequestEndComposition();
+        engine_.reset();
+        mode_ = mode;
+        TRACE("mode: %s", mode == Mode::Manual ? "manual" : "auto");
+    }
+    BOOL focused = FALSE;
+    if (threadMgr_ && SUCCEEDED(threadMgr_->IsThreadFocus(&focused)) && focused) PublishActive(true);
+}
+
+// The profile the service was activated with decides the mode.
+void TextService::ReadActiveProfile() {
+    ITfInputProcessorProfiles* legacy = nullptr;
+    typedef HRESULT(WINAPI * Factory)(ITfInputProcessorProfiles**);
+    if (HMODULE msctf = GetModuleHandleW(L"msctf.dll")) {
+        if (Factory make = (Factory)GetProcAddress(msctf, "TF_CreateInputProcessorProfiles")) make(&legacy);
+    }
+    if (!legacy) {
+        CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr, CLSCTX_INPROC_SERVER,
+                         __uuidof(ITfInputProcessorProfiles), (void**)&legacy);
+    }
+    if (!legacy) return;
+    ITfInputProcessorProfileMgr* profiles = nullptr;
+    if (SUCCEEDED(legacy->QueryInterface(__uuidof(ITfInputProcessorProfileMgr), (void**)&profiles)) && profiles) {
+        TF_INPUTPROCESSORPROFILE p = {};
+        if (SUCCEEDED(profiles->GetActiveProfile(GUID_TFCAT_TIP_KEYBOARD, &p)) &&
+            p.dwProfileType == TF_PROFILETYPE_INPUTPROCESSOR && IsEqualCLSID(p.clsid, CLSID_UzAlphaTip)) {
+            SetMode(IsEqualGUID(p.guidProfile, GUID_UzAlphaManualProfile) ? Mode::Manual : Mode::Auto);
+        }
+        profiles->Release();
+    }
+    legacy->Release();
+}
+
+STDMETHODIMP TextService::OnActivated(REFCLSID clsid, REFGUID profile, BOOL activated) {
+    if (activated && IsEqualCLSID(clsid, CLSID_UzAlphaTip)) {
+        SetMode(IsEqualGUID(profile, GUID_UzAlphaManualProfile) ? Mode::Manual : Mode::Auto);
+    }
+    return S_OK;
+}
+
+STDMETHODIMP TextService::SetManual(BOOL manual) {
+    SetMode(manual ? Mode::Manual : Mode::Auto);
+    return S_OK;
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +524,13 @@ STDMETHODIMP TextService::OnTestKeyDown(ITfContext* ctx, WPARAM wp, LPARAM lp, B
         return S_OK;
     }
 
-    const KeyInfo ki = ClassifyKey(wp, lp);
+    const KeyInfo ki = ClassifyKey(wp, lp, mode_);
+    if (mode_ == Mode::Manual) {
+        // No digraphs here: a key either types its own character or is one of
+        // the moved keys, which the service types itself in OnKeyDown.
+        *eaten = ki.overrideLayout ? TRUE : FALSE;
+        return S_OK;
+    }
     SyncPrevious(ctx, ki);
     const Action peek = engine_.peek(ki.key);
     TRACE("TestKeyDown vk=%02x kind=%d ch=%04x override=%d -> eat=%d", (unsigned)wp, (int)ki.key.kind,
@@ -482,12 +560,19 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* ctx, WPARAM wp, LPARAM lp, BOOL*
         return S_OK;
     }
 
-    const KeyInfo ki = ClassifyKey(wp, lp);
+    const KeyInfo ki = ClassifyKey(wp, lp, mode_);
+    if (mode_ == Mode::Manual) {
+        if (!ki.overrideLayout) return S_OK;
+        const HRESULT hrManual = Perform(ctx, Action(), ki.wanted);
+        TRACE("KeyDown (manual) vk=%02x -> %04x: %08lx", (unsigned)wp, (unsigned)ki.wanted, hrManual);
+        *eaten = SUCCEEDED(hrManual) ? TRUE : FALSE;
+        return S_OK;
+    }
     SyncPrevious(ctx, ki);
     const Action a = engine_.apply(ki.key);
-    // A key the engine passes, on a base layout that is not US English: type
-    // the US character ourselves.
-    const wchar_t literal = (!a.eat && ki.overrideLayout) ? ki.usChar : 0;
+    // A key the engine passes, on a base layout that would type something
+    // else: type the wanted character ourselves.
+    const wchar_t literal = (!a.eat && ki.overrideLayout) ? ki.wanted : 0;
     if (a.nothing() && !literal) return S_OK;
 
     const HRESULT hr = Perform(ctx, a, literal);

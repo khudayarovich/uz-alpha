@@ -5,6 +5,7 @@
 #include <string>
 
 #include "../src/engine/engine.h"
+#include "../src/engine/manual.h"
 #include "../src/engine/translit.h"
 
 using namespace uza;
@@ -148,6 +149,10 @@ int main() {
     expectTyped(L"o`\b", L"o`");
     expectTyped(L"a`b", L"a`b");  // elsewhere it stays a backtick
     expectTyped(L"s`", L"s`");
+    // ...and so do the curly and turned marks, should a keyboard deliver them
+    expectTyped(L"o‘zbek", L"özbek");
+    expectTyped(L"g’isht", L"ğişt");
+    expectTyped(L"Oʻzbek", L"Özbek");
 
     // --- chains: a pending letter commits when the next starter arrives ----
     expectTyped(L"tog'", L"toğ");
@@ -204,6 +209,41 @@ int main() {
     expectTyped(L"s\x01h", L"sh");
     expectTyped(L"o\x01'", L"o'");
     expectTyped(L"sh\x01\b", L"");  // after another key Backspace is a plain delete
+
+    // --- the Manual keyboard: keys by scan code (shift, caps, altGr) -------------
+    struct ManualCase {
+        unsigned scan;
+        bool shift, caps, altGr;
+        wchar_t want;
+    };
+    const ManualCase manualCases[] = {
+        {0x27, false, false, false, 0x015F}, {0x27, true, false, false, 0x015E},   // ; ş Ş
+        {0x27, false, true, false, 0x015E},  {0x27, true, true, false, 0x015F},    // CapsLock like a letter
+        {0x28, false, false, false, 0x00E7}, {0x28, true, false, false, 0x00C7},   // ' ç Ç
+        {0x1A, false, false, false, 0x00F6}, {0x1A, true, false, false, 0x00D6},   // [ ö Ö
+        {0x1B, false, false, false, 0x011F}, {0x1B, true, false, false, 0x011E},   // ] ğ Ğ
+        {0x29, false, false, false, 0x02BC}, {0x29, true, false, false, L'"'},     // ` ʼ "
+        {0x29, false, true, false, 0x02BC},                                        // CapsLock does not touch it
+        {0x2B, false, false, false, L';'},   {0x2B, true, false, false, L':'},     // \ ; :
+        {0x56, false, false, false, L';'},                                         // the extra ISO key
+        {0x1E, false, false, false, 0},      {0x02, true, false, false, 0},        // a, ! are not remapped
+        {0x25, false, false, true, 0x201C},  {0x25, true, false, true, 0x2018},    // AltGr K “ ‘
+        {0x26, false, false, true, 0x201D},  {0x26, true, false, true, 0x2019},    // AltGr L ” ’
+        {0x0C, false, false, true, 0x2014},  {0x0C, true, false, true, 0x2013},    // AltGr - — –
+        {0x1A, false, false, true, L'['},    {0x1B, true, false, true, L'}'},      // AltGr [ and Shift ]
+        {0x2B, false, false, true, L'\\'},   {0x2B, true, false, true, L'|'},
+        {0x28, false, false, true, L'\''},   {0x29, false, false, true, L'`'},     {0x29, true, false, true, L'~'},
+        {0x1E, false, false, true, 0},                                             // AltGr a: nothing
+    };
+    for (const ManualCase& c : manualCases) {
+        ++g_checks;
+        const wchar_t got = manualChar(c.scan, c.shift, c.caps, c.altGr);
+        if (got != c.want) {
+            ++g_failed;
+            printf("FAIL  manual key %02x shift=%d caps=%d altgr=%d: got U+%04X, want U+%04X\n", c.scan, c.shift,
+                   c.caps, c.altGr, (unsigned)got, (unsigned)c.want);
+        }
+    }
 
     // --- whole-text conversion --------------------------------------------------
     expectText("new 1", toNewAlphabet(L"O'zbekiston"), L"Özbekiston");

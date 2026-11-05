@@ -70,28 +70,59 @@ function Get-IconImageBytes([System.Drawing.Bitmap]$bmp) {
     return ,$ms.ToArray()
 }
 
-$sizes = 16, 20, 24, 32, 40, 48, 64, 256
-$images = @()
-foreach ($s in $sizes) {
-    $bmp = New-TileBitmap $s
-    $images += ,(Get-IconImageBytes $bmp)
-    $bmp.Dispose()
+# A language-code "icon": nothing but three letters on a transparent background,
+# so that in the Windows keyboard switcher it reads like the text codes Windows
+# draws itself (ENG, UZB...). Windows offers no way to supply real text there.
+# The colour is a mid blue that stays readable on both the dark and the light theme.
+function New-CodeBitmap([int]$size, [string]$text) {
+    $bmp = New-Object System.Drawing.Bitmap $size, $size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+    $g.Clear([System.Drawing.Color]::Transparent)
+    $fmt = New-Object System.Drawing.StringFormat([System.Drawing.StringFormat]::GenericTypographic)
+    # The largest size at which the three letters still fit the width.
+    $px = [single]$size
+    do {
+        $font = New-Object System.Drawing.Font "Bahnschrift Condensed", $px, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
+        $m = $g.MeasureString($text, $font, 1000, $fmt)
+        if ($m.Width -le $size) { break }
+        $font.Dispose(); $px -= 0.5
+    } while ($px -gt 4)
+    $brush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 52, 120, 240))
+    $g.DrawString($text, $font, $brush, [single](($size - $m.Width) / 2), [single](($size - $m.Height) / 2), $fmt)
+    $g.Dispose(); $brush.Dispose(); $font.Dispose()
+    return $bmp
 }
 
-$dir = Split-Path -Parent $OutPath
-if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
-$fs = [System.IO.File]::Create((Join-Path (Get-Location) $OutPath))
-$w = New-Object System.IO.BinaryWriter $fs
-$w.Write([int16]0); $w.Write([int16]1); $w.Write([int16]$sizes.Count)
-$offset = 6 + 16 * $sizes.Count
-for ($i = 0; $i -lt $sizes.Count; $i++) {
-    $s = $sizes[$i]
-    $dim = if ($s -ge 256) { 0 } else { $s }
-    $w.Write([byte]$dim); $w.Write([byte]$dim); $w.Write([byte]0); $w.Write([byte]0)
-    $w.Write([int16]1); $w.Write([int16]32)
-    $w.Write([int]$images[$i].Length); $w.Write([int]$offset)
-    $offset += $images[$i].Length
+function Write-Icon([string]$path, [scriptblock]$draw) {
+    $sizes = 16, 20, 24, 32, 40, 48, 64, 256
+    $images = @()
+    foreach ($s in $sizes) {
+        $bmp = & $draw $s
+        $images += ,(Get-IconImageBytes $bmp)
+        $bmp.Dispose()
+    }
+    $dir = Split-Path -Parent $path
+    if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
+    $fs = [System.IO.File]::Create((Join-Path (Get-Location) $path))
+    $w = New-Object System.IO.BinaryWriter $fs
+    $w.Write([int16]0); $w.Write([int16]1); $w.Write([int16]$sizes.Count)
+    $offset = 6 + 16 * $sizes.Count
+    for ($i = 0; $i -lt $sizes.Count; $i++) {
+        $s = $sizes[$i]
+        $dim = if ($s -ge 256) { 0 } else { $s }
+        $w.Write([byte]$dim); $w.Write([byte]$dim); $w.Write([byte]0); $w.Write([byte]0)
+        $w.Write([int16]1); $w.Write([int16]32)
+        $w.Write([int]$images[$i].Length); $w.Write([int]$offset)
+        $offset += $images[$i].Length
+    }
+    foreach ($img in $images) { $w.Write($img) }
+    $w.Flush(); $fs.Close()
+    Write-Output "wrote $path"
 }
-foreach ($img in $images) { $w.Write($img) }
-$w.Flush(); $fs.Close()
-Write-Output "wrote $OutPath ($($sizes -join ', ') px)"
+
+$assets = Split-Path -Parent $OutPath
+Write-Icon $OutPath { param($s) New-TileBitmap $s }
+Write-Icon (Join-Path $assets 'uza.ico') { param($s) New-CodeBitmap $s 'UZA' }
+Write-Icon (Join-Path $assets 'uzm.ico') { param($s) New-CodeBitmap $s 'UZM' }

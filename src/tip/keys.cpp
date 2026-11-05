@@ -1,6 +1,8 @@
 // Turns a WM_KEYDOWN (virtual key + lParam) into what the engine needs.
 #include "textservice.h"
 
+#include "../engine/manual.h"
+
 namespace {
 
 // US-English characters by scan code (set 1), unshifted and shifted.
@@ -47,7 +49,7 @@ bool Down(int vk) { return (GetKeyState(vk) & 0x8000) != 0; }
 
 }  // namespace
 
-KeyInfo ClassifyKey(WPARAM wp, LPARAM lp) {
+KeyInfo ClassifyKey(WPARAM wp, LPARAM lp, Mode mode) {
     KeyInfo ki;
     const UINT vk = (UINT)wp;
 
@@ -61,8 +63,24 @@ KeyInfo ClassifyKey(WPARAM wp, LPARAM lp) {
             return ki;
     }
 
-    if (Down(VK_CONTROL) || Down(VK_MENU) || Down(VK_LWIN) || Down(VK_RWIN) ||
-        vk == VK_PACKET || vk == VK_PROCESSKEY) {
+    const UINT scan = (UINT)((lp >> 16) & 0xFF);
+    const bool extended = (lp & (1 << 24)) != 0;
+    const bool shift = Down(VK_SHIFT);
+    const bool caps = (GetKeyState(VK_CAPITAL) & 1) != 0;
+    const bool ctrl = Down(VK_CONTROL), alt = Down(VK_MENU), win = Down(VK_LWIN) || Down(VK_RWIN);
+
+    // Manual keyboard: AltGr (right Alt, or Ctrl+Alt) reaches the symbols that
+    // gave up their keys, and the typographic quotes and dashes.
+    if (mode == Mode::Manual && !win && !extended && (Down(VK_RMENU) || (ctrl && alt))) {
+        if (const wchar_t c = uza::manualChar(scan, shift, caps, true)) {
+            ki.key = uza::Key::Char(c);
+            ki.wanted = c;
+            ki.overrideLayout = true;
+            return ki;
+        }
+    }
+
+    if (ctrl || alt || win || vk == VK_PACKET || vk == VK_PROCESSKEY) {
         ki.key = uza::Key::Other();
         return ki;
     }
@@ -78,20 +96,19 @@ KeyInfo ClassifyKey(WPARAM wp, LPARAM lp) {
         return ki;
     }
 
-    const UINT scan = (UINT)((lp >> 16) & 0xFF);
-    const bool extended = (lp & (1 << 24)) != 0;
-    const bool shift = Down(VK_SHIFT);
-    const bool caps = (GetKeyState(VK_CAPITAL) & 1) != 0;
-
-    const wchar_t us = extended ? 0 : UsChar(scan, shift, caps);
+    // Both keyboards are US QWERTY at heart; Manual moves a handful of keys.
+    wchar_t wanted = extended ? 0 : UsChar(scan, shift, caps);
+    if (mode == Mode::Manual && !extended) {
+        if (const wchar_t m = uza::manualChar(scan, shift, caps, false)) wanted = m;
+    }
     const wchar_t layout = LayoutChar(vk, scan, shift, caps);
 
-    if (!us && !layout) {
+    if (!wanted && !layout) {
         ki.key = uza::Key::Other();  // arrows, Enter, Tab, F-keys...
         return ki;
     }
-    ki.usChar = us;
-    ki.key = uza::Key::Char(us ? us : layout);
-    ki.overrideLayout = us && layout != us;
+    ki.wanted = wanted;
+    ki.key = uza::Key::Char(wanted ? wanted : layout);
+    ki.overrideLayout = wanted && layout != wanted;
     return ki;
 }
