@@ -30,8 +30,15 @@ struct Request {
     bool manual;
 };
 
-// HTTPS GET. The body goes to `file` if given, else into `body`.
-bool HttpGet(const std::wstring& url, std::vector<BYTE>* body, HANDLE file, size_t limit) {
+// HTTPS GET. The body goes to `file` if given, else into `body`. On failure
+// `why` says what went wrong (a Windows error number or the HTTP status), for
+// the log: "cannot read" alone does not tell a lost connection from a refusal.
+bool HttpGet(const std::wstring& url, std::vector<BYTE>* body, HANDLE file, size_t limit, std::wstring* why) {
+    const auto windowsError = [why](const wchar_t* step) {
+        wchar_t buf[96];
+        swprintf_s(buf, L"%s: error %lu", step, GetLastError());
+        *why = buf;
+    };
     wchar_t host[256] = {};
     wchar_t path[2048] = {};
     URL_COMPONENTS uc = {};
@@ -40,7 +47,10 @@ bool HttpGet(const std::wstring& url, std::vector<BYTE>* body, HANDLE file, size
     uc.dwHostNameLength = ARRAYSIZE(host);
     uc.lpszUrlPath = path;
     uc.dwUrlPathLength = ARRAYSIZE(path);
-    if (!WinHttpCrackUrl(url.c_str(), 0, 0, &uc) || uc.nScheme != INTERNET_SCHEME_HTTPS) return false;
+    if (!WinHttpCrackUrl(url.c_str(), 0, 0, &uc) || uc.nScheme != INTERNET_SCHEME_HTTPS) {
+        *why = L"not an https address";
+        return false;
+    }
 
     bool ok = false;
     HINTERNET session = WinHttpOpen(UZA_BRAND L"/" UZA_VERSION_W, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
@@ -56,30 +66,42 @@ bool HttpGet(const std::wstring& url, std::vector<BYTE>* body, HANDLE file, size
         request = WinHttpOpenRequest(connect, L"GET", path, nullptr, WINHTTP_NO_REFERER,
                                      WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
     }
-    if (request && WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
-        WinHttpReceiveResponse(request, nullptr)) {
+    if (!request) {
+        windowsError(L"opening the request");
+    } else if (!WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
+        windowsError(L"sending the request");
+    } else if (!WinHttpReceiveResponse(request, nullptr)) {
+        windowsError(L"waiting for the answer");
+    } else {
         DWORD status = 0, size = sizeof status;
         WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
                             &status, &size, WINHTTP_NO_HEADER_INDEX);
-        if (status == 200) {
+        if (status != 200) {
+            wchar_t buf[48];
+            swprintf_s(buf, L"HTTP status %lu", status);
+            *why = buf;
+        } else {
             size_t total = 0;
             BYTE chunk[16384];
             ok = true;
             for (;;) {
                 DWORD got = 0;
                 if (!WinHttpReadData(request, chunk, sizeof chunk, &got)) {
+                    windowsError(L"reading the answer");
                     ok = false;
                     break;
                 }
                 if (got == 0) break;
                 total += got;
                 if (total > limit) {
+                    *why = L"the file is larger than expected";
                     ok = false;
                     break;
                 }
                 if (file) {
                     DWORD written = 0;
                     if (!WriteFile(file, chunk, got, &written, nullptr) || written != got) {
+                        windowsError(L"saving the file");
                         ok = false;
                         break;
                     }
@@ -204,8 +226,18 @@ void RemoveOtherDownloads(const std::wstring& dir, const std::wstring& keep) {
 
 void Check(UpdateResult* result) {
     std::vector<BYTE> body;
-    if (!HttpGet(kInfoUrl, &body, nullptr, kMaxInfoBytes)) {
-        Log(L"update: cannot read %s", kInfoUrl);
+    std::wstring why;
+    bool read = HttpGet(kInfoUrl, &body, nullptr, kMaxInfoBytes, &why);
+    if (!read) {
+        // A connection that drops for a moment should not end in an error
+        // message: try once more before giving up. (This is a worker thread.)
+        Log(L"update: cannot read %s (%s), trying once more", kInfoUrl, why.c_str());
+        Sleep(2500);
+        body.clear();
+        read = HttpGet(kInfoUrl, &body, nullptr, kMaxInfoBytes, &why);
+    }
+    if (!read) {
+        Log(L"update: cannot read %s (%s)", kInfoUrl, why.c_str());
         return;
     }
     const std::string info(body.begin(), body.end());
@@ -249,11 +281,11 @@ void Check(UpdateResult* result) {
     const std::wstring part = target + L".part";
     const HANDLE f = CreateFileW(part.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE) return;
-    const bool got = HttpGet(url, nullptr, f, kMaxExeBytes);
+    const bool got = HttpGet(url, nullptr, f, kMaxExeBytes, &why);
     CloseHandle(f);
     if (!got) {
         DeleteFileW(part.c_str());
-        Log(L"update: download of %s failed", url.c_str());
+        Log(L"update: download of %s failed (%s)", url.c_str(), why.c_str());
         return;
     }
     if (FileSha256(part) != sha) {
