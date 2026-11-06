@@ -118,6 +118,8 @@ public class TypingTest : Form {
     public readonly List<string> Lines = new List<string>();
     public int Failures;
     public bool NoForeground;
+    IntPtr self;
+    volatile bool lostFocus;
     Control box;
     ITfInputProcessorProfileMgr profiles;
     TF_INPUTPROCESSORPROFILE before;
@@ -127,7 +129,7 @@ public class TypingTest : Form {
         this.hosts = hosts; this.gap = gap;
         Text = "UzAlpha typing test - please do not type";
         Width = 560; Height = 200; StartPosition = FormStartPosition.CenterScreen; TopMost = true;
-        Shown += delegate { Thread t = new Thread(Scenario); t.IsBackground = true; t.Start(); };
+        Shown += delegate { self = Handle; Thread t = new Thread(Scenario); t.IsBackground = true; t.Start(); };
     }
 
     T Ui<T>(Func<T> f) { return (T)Invoke(f); }
@@ -155,6 +157,8 @@ public class TypingTest : Form {
             else if (c == '<') vk = 0x08;
             else if (c == '~') vk = 0x0D;
             else throw new ArgumentException("no key for " + c);
+            // Never press a key into somebody else's window: stop the moment ours is not in front.
+            if (GetForegroundWindow() != self) { lostFocus = true; return; }
             if (shift) Key(0x10, false);
             Key(vk, false); Key(vk, true);
             if (shift) Key(0x10, true);
@@ -251,6 +255,7 @@ public class TypingTest : Form {
                     Clear();
                     Thread.Sleep(120);
                     TypeKeys(c[0]);
+                    if (lostFocus) { Say("stopped while typing \"" + c[0] + "\": another window came to the front"); NoForeground = true; return; }
                     // Whatever is still held (a last s, c, o or g) is not text yet; let it settle.
                     Thread.Sleep(250);
                     string got = Read();
