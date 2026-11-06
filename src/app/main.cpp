@@ -510,6 +510,14 @@ void DoSwitch(Keyboard k) {
     SetTimer(g_hwnd, kAfterSwitchTimer, 1200, nullptr);
 }
 
+// Shown after an update. A program that is already running keeps the keyboard
+// service it loaded until it is restarted, and nobody restarts Explorer: its
+// rename box and the Start menu would go on with the old one for days.
+const wchar_t kAfterUpdateNote[] =
+    L"Oçiq turgan dasturlar yangi versiyani qayta işga tuşirilgandan söng işlatadi.\n\n"
+    L"Fayl nomini özgartiriş kabi Windows oynalarida ham yangi versiya işlaşi uçun "
+    L"tizimdan çiqib qayta kiring yoki kompyuterni qayta işga tuşiring.";
+
 void DoInstall() {
     const bool wasUpdate = g_updateMode;
     std::wstring error;
@@ -521,13 +529,12 @@ void DoInstall() {
         if (!error.empty()) MessageBoxW(g_hwnd, error.c_str(), UZA_BRAND, MB_OK | MB_ICONERROR);
         return;
     }
-    MessageBoxW(g_hwnd,
-                wasUpdate ? UZA_BRAND L" yangilandi.\n\n"
-                            L"Oçiq turgan dasturlar yangi versiyani qayta işga tuşirilgandan söng işlatadi."
-                          : L"Klaviaturalar örnatildi.\n\n"
-                            L"Win + Space tugmalari yoki şu oyna orqali «" UZA_AUTO_NAME L"» yoki «" UZA_MANUAL_NAME
-                            L"» klaviaturasini tanlang.",
-                UZA_BRAND, MB_OK | MB_ICONINFORMATION);
+    const std::wstring done =
+        wasUpdate ? std::wstring(UZA_BRAND L" yangilandi.\n\n") + kAfterUpdateNote
+                  : std::wstring(L"Klaviaturalar örnatildi.\n\n"
+                                 L"Win + Space tugmalari yoki şu oyna orqali «" UZA_AUTO_NAME L"» yoki «" UZA_MANUAL_NAME
+                                 L"» klaviaturasini tanlang.");
+    MessageBoxW(g_hwnd, done.c_str(), UZA_BRAND, MB_OK | MB_ICONINFORMATION);
     // Carry on from the installed copy, so the downloaded file can be deleted.
     if (lstrcmpiW(SelfPath().c_str(), InstalledExePath().c_str()) != 0) {
         g_relaunchInstalled = true;
@@ -551,9 +558,7 @@ void DoApplyUpdate() {
         RefreshState(true);
         return;
     }
-    const std::wstring done = UZA_BRAND L" " + g_update->version +
-                              L" örnatildi.\n\n"
-                              L"Oçiq turgan dasturlar yangi versiyani qayta işga tuşirilgandan söng işlatadi.";
+    const std::wstring done = UZA_BRAND L" " + g_update->version + L" örnatildi.\n\n" + kAfterUpdateNote;
     MessageBoxW(g_hwnd, done.c_str(), UZA_BRAND, MB_OK | MB_ICONINFORMATION);
     g_relaunchInstalled = true;
     DestroyWindow(g_hwnd);

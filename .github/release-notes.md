@@ -2,13 +2,13 @@ Yangi özbek alifbosi (ş ç ö ğ ʼ) uçun klaviaturalar · Keyboards for the 
 
 ## Örnatiş
 
-**Windows 10/11:** `UzAlpha.exe` faylini yuklab, işga tuşiring → **Örnatiş** → Windows sörovini tasdiqlang. «Windows protected your PC» çiqsa: More info → Run anyway. Avval örnatilgan bölsa, dastur özi yangilanişni taklif qiladi.
+**Windows 10/11:** `UzAlpha.exe` faylini yuklab, işga tuşiring → **Örnatiş** → Windows sörovini tasdiqlang. «Windows protected your PC» çiqsa: More info → Run anyway. Avval örnatilgan bölsa, dastur özi yangilanişni taklif qiladi; yangilanişdan söng tizimdan çiqib qayta kiring (yoki kompyuterni qayta işga tuşiring), şunda Explorer va boşqa oçiq dasturlar ham yangi versiyani işlatadi.
 
 **macOS:** `UzAlpha-macOS.dmg` ni oçing → `UzAlpha.bundle` ni **Keyboard Layouts** papkasi ustiga sudrab taşlang (yoki `install.command`: öng tugma → Open) → tizimdan çiqib qayta kiring → System Settings → Keyboard → Input Sources orqali ikkala klaviaturani qöşing.
 
 ## Install
 
-**Windows 10/11 (x64):** download and run `UzAlpha.exe`, press **Örnatiş** and approve the Windows prompt. If SmartScreen appears: More info → Run anyway (the binaries are not code-signed yet). An installed copy offers the update by itself.
+**Windows 10/11 (x64):** download and run `UzAlpha.exe`, press **Örnatiş** and approve the Windows prompt. If SmartScreen appears: More info → Run anyway (the binaries are not code-signed yet). An installed copy offers the update by itself; after an update, sign out and back in (or restart the PC) so that File Explorer and other programs that were open pick up the new keyboard.
 
 **macOS:** open `UzAlpha-macOS.dmg`, drag `UzAlpha.bundle` onto the **Keyboard Layouts** folder (or run `install.command`: right-click → Open), log out and in, then add both keyboards under System Settings → Keyboard → Input Sources.
 
