@@ -219,7 +219,8 @@ public class TypingTest : Form {
                 new[] { "ma'no ",         "ma{t}no " },
                 new[] { "ish<x",          "ishx" },
                 new[] { "as<x",           "ax" },
-                new[] { "los~so",         "los\nso" },
+                new[] { "los~sa",         "los\nsa" },
+                new[] { "tog~~x",         "tog\n\nx" },
             };
 
             foreach (string host in hosts) {

@@ -41,6 +41,17 @@ void UzaTrace(const char* fmt, ...) {
 
 namespace {
 
+// Is this process inside an app container (Store apps, the Start menu search)?
+// Windows does not let such a process press keys.
+bool InAppContainer() {
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return false;
+    DWORD inContainer = 0, size = 0;
+    const BOOL ok = GetTokenInformation(token, TokenIsAppContainer, &inContainer, sizeof inContainer, &size);
+    CloseHandle(token);
+    return ok && inContainer != 0;
+}
+
 enum class SessionKind { Action, EndComposition, InputScope, ReadPrevious };
 
 // One unit of work done under the document lock.
@@ -173,6 +184,8 @@ STDMETHODIMP TextService::ActivateEx(ITfThreadMgr* tm, TfClientId tid, DWORD) {
     threadMgr_ = tm;
     threadMgr_->AddRef();
     clientId_ = tid;
+    canResend_ = !InAppContainer();
+    claimedVk_ = resendVk_ = 0;
 
     ITfSource* source = nullptr;
     if (SUCCEEDED(tm->QueryInterface(__uuidof(ITfSource), (void**)&source))) {
@@ -357,6 +370,11 @@ STDMETHODIMP TextService::SetManual(BOOL manual) {
     return S_OK;
 }
 
+STDMETHODIMP TextService::SetResend(BOOL allowed) {
+    canResend_ = allowed != FALSE;
+    return S_OK;
+}
+
 // ---------------------------------------------------------------------------
 // Focus tracking
 
@@ -514,9 +532,68 @@ bool TextService::CanHandle(ITfContext* ctx) {
 // ---------------------------------------------------------------------------
 // Keys
 
+// A key that ends the open letter but types nothing itself (Enter, an arrow,
+// Ctrl+C) has to reach the application after the letter. Neither of the two
+// plain ways does that:
+//   - finishing the letter in OnTestKeyDown and answering "not mine": the key
+//     goes straight on, and our text, which travels another way, arrives
+//     behind it (Enter ran ahead of the last letter of a line);
+//   - claiming the key and answering "not eaten" from OnKeyDown: the key is
+//     never delivered at all.
+// So the key is claimed, the letter is finished in OnKeyDown, and the key is
+// pressed again through the system; it comes back with nothing open and is
+// let through. The same is done for any claimed key that turns out not to be
+// ours after all, so that no key is ever lost.
+bool TextService::CanResend(WPARAM vk) const {
+    // Text sent as packets carries its character where we cannot read it.
+    return canResend_ && vk != VK_PACKET && vk != VK_PROCESSKEY;
+}
+
+void TextService::Resend(WPARAM vk, LPARAM lp) {
+    INPUT in[2] = {};
+    for (INPUT& i : in) {
+        i.type = INPUT_KEYBOARD;
+        i.ki.wVk = (WORD)vk;
+        i.ki.wScan = (WORD)((lp >> 16) & 0xFF);
+        i.ki.dwFlags = (lp & (1 << 24)) ? KEYEVENTF_EXTENDEDKEY : 0;
+    }
+    // Still held down: let it go and press it again, so that the application
+    // sees a fresh press and not a repeat (the user's own release ends it).
+    // Already released: a whole press.
+    const bool held = (GetAsyncKeyState((int)vk) & 0x8000) != 0;
+    in[held ? 0 : 1].ki.dwFlags |= KEYEVENTF_KEYUP;
+
+    resendVk_ = vk;
+    resendTick_ = GetTickCount();
+    resendSeen_ = false;
+    if (SendInput(2, in, sizeof(INPUT)) != 2) {
+        TRACE("Resend vk=%02x failed (%lu)", (unsigned)vk, GetLastError());
+        canResend_ = false;  // not allowed in this process: do not claim such keys again
+        resendVk_ = 0;
+    }
+}
+
+bool TextService::IsResent(WPARAM vk) {
+    if (!resendVk_) return false;
+    if (GetTickCount() - resendTick_ > 2000) {
+        resendVk_ = 0;
+        return false;
+    }
+    return vk == resendVk_;
+}
+
 STDMETHODIMP TextService::OnTestKeyDown(ITfContext* ctx, WPARAM wp, LPARAM lp, BOOL* eaten) {
     if (!eaten) return E_INVALIDARG;
     *eaten = FALSE;
+    claimedVk_ = 0;
+
+    if (IsResent(wp)) {
+        // Our own press coming back: it belongs to the application now.
+        resendSeen_ = true;
+        if (composition_) RequestEndComposition();
+        engine_.reset();
+        return S_OK;
+    }
 
     if (!CanHandle(ctx)) {
         if (composition_) RequestEndComposition();
@@ -529,80 +606,103 @@ STDMETHODIMP TextService::OnTestKeyDown(ITfContext* ctx, WPARAM wp, LPARAM lp, B
         // No digraphs here: a key either types its own character or is one of
         // the moved keys, which the service types itself in OnKeyDown.
         *eaten = ki.overrideLayout ? TRUE : FALSE;
+        if (*eaten) claimedVk_ = wp;
         return S_OK;
     }
     SyncPrevious(ctx, ki);
     const Action peek = engine_.peek(ki.key);
-    // A composition the engine has already let go of (focus moved away and its
-    // end has not run yet) is closed by the next key as well.
-    const bool leftover = composition_ && !engine_.composing() && ki.key.kind != uza::KeyKind::ModifierOnly;
-    const bool claim = peek.eat || peek.commit || ki.overrideLayout || leftover;
+    const bool endsLetter = peek.commit && !peek.eat;  // Enter, an arrow, Ctrl+C... with a letter open
+    const bool claim = peek.eat || ki.overrideLayout || (endsLetter && CanResend(wp));
     TRACE("TestKeyDown vk=%02x kind=%d ch=%04x override=%d -> claim=%d", (unsigned)wp, (int)ki.key.kind,
           (unsigned)ki.key.ch, (int)ki.overrideLayout, (int)claim);
     if (claim) {
-        // Everything that touches the document happens in OnKeyDown, also for a
-        // key that only ends the open letter and is then handed back (Enter, an
-        // arrow). The document must not be changed here: a host that is told
-        // "not mine" lets the key go on its way at once, and text written from
-        // here reaches the application by another route and arrives after it.
+        // The document is only ever changed in OnKeyDown: text written from
+        // here reaches the application behind the key it belongs in front of.
+        claimedVk_ = wp;
         *eaten = TRUE;
         return S_OK;
     }
 
-    // Nothing to do in the document. The engine still takes note of the key
-    // (the apostrophe rule looks at the letter before it): hosts do not call
-    // OnKeyDown for a key that was not claimed here.
-    engine_.apply(ki.key);
+    // Not ours. The engine still takes note of the key (the apostrophe rule
+    // looks at the letter before it): hosts do not call OnKeyDown for a key
+    // that was not claimed here. Where keys cannot be pressed again, a key
+    // that ends the open letter finishes it from here, the old way.
+    const Action a = engine_.apply(ki.key);
+    if (!a.nothing() && FAILED(Perform(ctx, a, 0))) {
+        AbandonComposition();
+        engine_.reset();
+    }
     return S_OK;
 }
 
 STDMETHODIMP TextService::OnKeyDown(ITfContext* ctx, WPARAM wp, LPARAM lp, BOOL* eaten) {
     if (!eaten) return E_INVALIDARG;
     *eaten = FALSE;
+    const bool claimed = claimedVk_ != 0 && claimedVk_ == wp;
+    claimedVk_ = 0;
 
-    if (!CanHandle(ctx)) {
+    if (IsResent(wp)) {
+        resendSeen_ = true;
         if (composition_) RequestEndComposition();
         engine_.reset();
         return S_OK;
     }
 
+    KeyDown(ctx, wp, lp, eaten);
+
+    // The host was told this key is ours. Whatever we did not type ourselves
+    // goes back to the application, behind any text written just now.
+    if (!*eaten && claimed && CanResend(wp)) {
+        Resend(wp, lp);
+        if (resendVk_) *eaten = TRUE;
+    }
+    return S_OK;
+}
+
+void TextService::KeyDown(ITfContext* ctx, WPARAM wp, LPARAM lp, BOOL* eaten) {
+    if (!CanHandle(ctx)) {
+        if (composition_) RequestEndComposition();
+        engine_.reset();
+        return;
+    }
+
     const KeyInfo ki = ClassifyKey(wp, lp, mode_);
     if (mode_ == Mode::Manual) {
-        if (!ki.overrideLayout) return S_OK;
+        if (!ki.overrideLayout) return;
         const HRESULT hrManual = Perform(ctx, Action(), ki.wanted);
         TRACE("KeyDown (manual) vk=%02x -> %04x: %08lx", (unsigned)wp, (unsigned)ki.wanted, hrManual);
         *eaten = SUCCEEDED(hrManual) ? TRUE : FALSE;
-        return S_OK;
+        return;
     }
     SyncPrevious(ctx, ki);
     const Action a = engine_.apply(ki.key);
     // A key the engine passes, on a base layout that would type something
     // else: type the wanted character ourselves.
     const wchar_t literal = (!a.eat && ki.overrideLayout) ? ki.wanted : 0;
-    if (a.nothing() && !literal && !composition_) return S_OK;
+    if (a.nothing() && !literal) return;
 
-    // Returning "not eaten" after the edit (a key that only ended the open
-    // letter) hands the key back to the host behind our text.
     const HRESULT hr = Perform(ctx, a, literal);
     TRACE("KeyDown vk=%02x edit=%d commit=%d text=%04x literal=%04x -> %08lx", (unsigned)wp, (int)a.edit,
           (int)a.commit, (unsigned)a.text[0], (unsigned)literal, hr);
     if (FAILED(hr)) {
-        // No document lock: fall back to plain typing for this key.
+        // No document lock: plain typing for this key.
         AbandonComposition();
         engine_.reset();
-        return S_OK;
+        return;
     }
     *eaten = a.eat || literal != 0;
+}
+
+// The release of a key we pressed again ourselves ends its special treatment.
+STDMETHODIMP TextService::OnTestKeyUp(ITfContext*, WPARAM wp, LPARAM, BOOL* eaten) {
+    if (eaten) *eaten = FALSE;
+    if (resendVk_ == wp && resendSeen_) resendVk_ = 0;
     return S_OK;
 }
 
-STDMETHODIMP TextService::OnTestKeyUp(ITfContext*, WPARAM, LPARAM, BOOL* eaten) {
+STDMETHODIMP TextService::OnKeyUp(ITfContext*, WPARAM wp, LPARAM, BOOL* eaten) {
     if (eaten) *eaten = FALSE;
-    return S_OK;
-}
-
-STDMETHODIMP TextService::OnKeyUp(ITfContext*, WPARAM, LPARAM, BOOL* eaten) {
-    if (eaten) *eaten = FALSE;
+    if (resendVk_ == wp && resendSeen_) resendVk_ = 0;
     return S_OK;
 }
 

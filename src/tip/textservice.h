@@ -26,9 +26,11 @@ struct KeyInfo {
     bool overrideLayout = false;
 };
 
-// Lets the test harness pick the keyboard without registering the real profiles.
+// Lets the test harness pick the keyboard without registering the real profiles,
+// and keep the service from pressing keys on the real keyboard queue.
 struct __declspec(uuid("08E01424-6802-4FF1-8190-3CE8DEACC6CB")) IUzAlphaMode : IUnknown {
     virtual HRESULT STDMETHODCALLTYPE SetManual(BOOL manual) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetResend(BOOL allowed) = 0;
 };
 
 class TextService : public ITfTextInputProcessorEx,
@@ -68,6 +70,7 @@ public:
 
     // IUzAlphaMode
     STDMETHODIMP SetManual(BOOL manual) override;
+    STDMETHODIMP SetResend(BOOL allowed) override;
 
     // ITfKeyEventSink
     STDMETHODIMP OnSetFocus(BOOL foreground) override;
@@ -94,6 +97,11 @@ private:
     ~TextService();
 
     bool CanHandle(ITfContext* ctx);
+    void KeyDown(ITfContext* ctx, WPARAM wp, LPARAM lp, BOOL* eaten);
+    // Handing a key back to the application behind our own text: see Resend.
+    bool CanResend(WPARAM vk) const;
+    void Resend(WPARAM vk, LPARAM lp);
+    bool IsResent(WPARAM vk);
     HRESULT Perform(ITfContext* ctx, const uza::Action& a, wchar_t literal);
     void AbandonComposition();
     void RequestEndComposition();
@@ -121,6 +129,14 @@ private:
     uza::Engine engine_;
     ITfComposition* composition_ = nullptr;
     ITfContext* compositionCtx_ = nullptr;  // context that owns composition_
+
+    // The key OnTestKeyDown last told the host is ours (0 = none).
+    WPARAM claimedVk_ = 0;
+    // A key the service pressed again itself, to be let through when it arrives.
+    WPARAM resendVk_ = 0;
+    DWORD resendTick_ = 0;
+    bool resendSeen_ = false;
+    bool canResend_ = true;
 
     // Context found to be a password/PIN field; compared by address only.
     ITfContext* bypassCtx_ = nullptr;

@@ -110,6 +110,7 @@ static bool keyFor(wchar_t c, KeyDef& k) {
 // profile Windows activates.
 struct __declspec(uuid("08E01424-6802-4FF1-8190-3CE8DEACC6CB")) IUzAlphaMode : IUnknown {
     virtual HRESULT STDMETHODCALLTYPE SetManual(BOOL manual) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetResend(BOOL allowed) = 0;
 };
 
 // Wraps the DLL's class factory to keep hold of the instance TSF creates.
@@ -385,6 +386,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     }
     spy.last->QueryInterface(__uuidof(IUzAlphaMode), (void**)&h.mode);
     fprintf(g_log, "mode switch available: %s\n", h.mode ? "yes" : "NO");
+    // Keys are handed to the service by direct calls here, so it must not press
+    // any on the real keyboard queue: they would land in whatever window is in
+    // front. A key that ends an open letter is then finished from OnTestKeyDown
+    // (the path used inside app containers); the path with a real second press
+    // is covered by tools/typing-test.ps1.
+    if (h.mode) h.mode->SetResend(FALSE);
     {
         ITfKeystrokeMgr* km = nullptr;
         CLSID fg = {};
