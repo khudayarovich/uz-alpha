@@ -140,19 +140,30 @@ Action Engine::decide(const Key& k, Engine& next) const {
     next.state_ = State::Idle;
     next.first_ = next.second_ = 0;
 
-    if (c == kApostrophe && isLetter(last_)) {
-        // Tutuq belgisi: ma'no -> maʼno.
+    // Tutuq belgisi: ma'no -> maʼno.
+    const wchar_t typed = (c == kApostrophe && isLetter(last_)) ? kTutuq : c;
+    next.last_ = typed;
+
+    if (open) {
+        // Finish the open letter and type this character with it, as one piece
+        // of text. Handing the key back instead ("here is my letter, now you
+        // type that key") lets the key overtake the letter wherever the two
+        // reach the application by different routes: classic edit boxes, Qt
+        // programs and terminals built on xterm.js all showed "server" as
+        // "esrver".
         a.eat = true;
-        a.commit = open;
+        a.edit = Edit::ReplaceAndEnd;
+        setText(a, state_ == State::Pending ? first_ : converted(first_), typed);
+        return a;
+    }
+    if (typed != c) {
+        a.eat = true;
         a.edit = Edit::Insert;
-        setText(a, kTutuq);
-        next.last_ = kTutuq;
+        setText(a, typed);
         return a;
     }
 
-    // Any other character: let the application have the key.
-    a.commit = open;
-    next.last_ = c;
+    // Nothing open and nothing to change: the application types the key itself.
     return a;
 }
 

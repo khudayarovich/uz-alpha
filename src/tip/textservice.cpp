@@ -533,20 +533,26 @@ STDMETHODIMP TextService::OnTestKeyDown(ITfContext* ctx, WPARAM wp, LPARAM lp, B
     }
     SyncPrevious(ctx, ki);
     const Action peek = engine_.peek(ki.key);
-    TRACE("TestKeyDown vk=%02x kind=%d ch=%04x override=%d -> eat=%d", (unsigned)wp, (int)ki.key.kind,
-          (unsigned)ki.key.ch, (int)ki.overrideLayout, (int)(peek.eat || ki.overrideLayout));
-    if (peek.eat || ki.overrideLayout) {
-        *eaten = TRUE;  // the work happens in OnKeyDown
+    // A composition the engine has already let go of (focus moved away and its
+    // end has not run yet) is closed by the next key as well.
+    const bool leftover = composition_ && !engine_.composing() && ki.key.kind != uza::KeyKind::ModifierOnly;
+    const bool claim = peek.eat || peek.commit || ki.overrideLayout || leftover;
+    TRACE("TestKeyDown vk=%02x kind=%d ch=%04x override=%d -> claim=%d", (unsigned)wp, (int)ki.key.kind,
+          (unsigned)ki.key.ch, (int)ki.overrideLayout, (int)claim);
+    if (claim) {
+        // Everything that touches the document happens in OnKeyDown, also for a
+        // key that only ends the open letter and is then handed back (Enter, an
+        // arrow). The document must not be changed here: a host that is told
+        // "not mine" lets the key go on its way at once, and text written from
+        // here reaches the application by another route and arrives after it.
+        *eaten = TRUE;
         return S_OK;
     }
 
-    // The application will handle this key itself. Commit now: hosts usually
-    // do not call OnKeyDown for a key that was not claimed here.
-    const Action a = engine_.apply(ki.key);
-    if (!a.nothing() && FAILED(Perform(ctx, a, 0))) {
-        AbandonComposition();
-        engine_.reset();
-    }
+    // Nothing to do in the document. The engine still takes note of the key
+    // (the apostrophe rule looks at the letter before it): hosts do not call
+    // OnKeyDown for a key that was not claimed here.
+    engine_.apply(ki.key);
     return S_OK;
 }
 
@@ -573,8 +579,10 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* ctx, WPARAM wp, LPARAM lp, BOOL*
     // A key the engine passes, on a base layout that would type something
     // else: type the wanted character ourselves.
     const wchar_t literal = (!a.eat && ki.overrideLayout) ? ki.wanted : 0;
-    if (a.nothing() && !literal) return S_OK;
+    if (a.nothing() && !literal && !composition_) return S_OK;
 
+    // Returning "not eaten" after the edit (a key that only ended the open
+    // letter) hands the key back to the host behind our text.
     const HRESULT hr = Perform(ctx, a, literal);
     TRACE("KeyDown vk=%02x edit=%d commit=%d text=%04x literal=%04x -> %08lx", (unsigned)wp, (int)a.edit,
           (int)a.commit, (unsigned)a.text[0], (unsigned)literal, hr);

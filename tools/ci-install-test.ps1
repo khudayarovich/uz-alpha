@@ -69,6 +69,14 @@ Set-ItemProperty $settingsKey -Name Autostart -Value 1 -Type DWord
 [void](RunAppBriefly)
 Check 'and comes back when it is turned on again' ((StartupEntry) -eq $startupCommand)
 
+Write-Host '=== typing through the Avtomatik keyboard, with real key presses'
+# Words typed into a classic edit box, a rich-text box and a box that takes
+# letters at key-down time (as Qt programs and xterm.js terminals do). A held
+# letter that the next key overtakes ("server" -> "esrver") shows up here.
+$typingArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PWD 'tools\typing-test.ps1'), '-SkipIfNoForeground')
+& powershell.exe @typingArgs | ForEach-Object { Write-Host "      $_" }
+Check 'words arrive as they were typed, in all three kinds of text box' ($LASTEXITCODE -eq 0)
+
 Write-Host '=== the convert shortcut, pressed for real'
 # Ctrl+Alt+Shift+Y / E in a test window, against the installed app. A window
 # that hangs while the app waits for its copy shows up here as a stall.

@@ -1,6 +1,7 @@
 // Unit tests for the conversion engine and the whole-text transliteration.
 // The harness drives the engine exactly the way the text service does:
-// OnTestKeyDown (peek, and apply when the key is not eaten) then OnKeyDown.
+// OnTestKeyDown only looks (peek) and claims every key that has work for the
+// document; OnKeyDown (apply) does that work.
 #include <cstdio>
 #include <string>
 
@@ -89,18 +90,25 @@ static std::wstring type(const std::wstring& keys) {
     Doc doc;
     for (wchar_t c : keys) {
         const Key k = toKey(c);
-        const Action test = eng.peek(k);  // OnTestKeyDown
-        if (eng.peek(k).eat != test.eat) fail("peek is not stable", keys);
+        const Action test = eng.peek(k);  // OnTestKeyDown: looks, changes nothing
+        if (!same(eng.peek(k), test)) fail("peek is not stable", keys);
 
-        if (test.eat) {
-            const Action a = eng.apply(k);  // OnKeyDown
+        if (test.eat || test.commit) {
+            // Claimed: the document is only ever changed in OnKeyDown.
+            const Action a = eng.apply(k);
             if (!same(a, test)) fail("peek and apply disagree", keys);
             doc.perform(a);
+            if (!a.eat) {
+                // The open letter is finished; now the application gets the key.
+                // Only a key that types nothing may travel this way: a character
+                // handed back here could overtake the letter ("server" -> "esrver").
+                if (k.kind != KeyKind::Other) fail("a typing key was handed back while a letter was open", keys);
+                if (doc.open) fail("key passed through while a composition is open", keys);
+            }
         } else {
-            const Action a = eng.apply(k);  // commit as a side effect of OnTestKeyDown
-            if (a.eat) fail("apply eats a key that peek passed", keys);
-            doc.perform(a);
-            const Action again = eng.apply(k);  // OnKeyDown for the same key
+            const Action a = eng.apply(k);  // the engine only takes note of the key
+            if (!a.nothing()) fail("apply acts on a key that peek passed", keys);
+            const Action again = eng.apply(k);  // a host may ask about the same key twice
             if (!again.nothing()) fail("second apply is not a no-op", keys);
             // The application handles the key itself.
             if (doc.open && k.kind != KeyKind::ModifierOnly) {

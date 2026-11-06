@@ -3,5 +3,5 @@
 
 #define UZA_VER_MAJOR 1
 #define UZA_VER_MINOR 0
-#define UZA_VER_PATCH 6
-#define UZA_VER_STR "1.0.6"
+#define UZA_VER_PATCH 7
+#define UZA_VER_STR "1.0.7"
